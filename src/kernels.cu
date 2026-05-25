@@ -163,4 +163,79 @@ __global__ void elitism_kernel(const double* pop, double* new_pop, const double*
     }
 }
 
+__global__ void statistics_kernel(const double* pop, const double* fitness, Config config, double* stats) {
+    /// Statistics
+    double sum = 0.0;
+    double sum_sq = 0.0;
+    double best_fit = 1e9;
+    double worst_fit = -1e9;
+    
+    for (int i = threadIdx.x; i < config.population; i += blockDim.x) {
+        sum += fitness[i];
+        sum_sq += fitness[i] * fitness[i];
+        if (fitness[i] < best_fit) {
+            best_fit = fitness[i];
+        }
+        if (fitness[i] > worst_fit) {
+            worst_fit = fitness[i];
+        }
+    }
+
+    // Block reduction: reduce from 1024 to 32 threads
+    __shared__ double shared_sum[1024];
+    __shared__ double shared_sum_sq[1024];
+    __shared__ double shared_best[1024];
+    __shared__ double shared_worst[1024];
+    shared_sum[threadIdx.x] = sum;
+    shared_sum_sq[threadIdx.x] = sum_sq;
+    shared_best[threadIdx.x] = best_fit;
+    shared_worst[threadIdx.x] = worst_fit;
+    __syncthreads();
+
+    // Parallel block reduction step
+    for (int s = blockDim.x / 2; s >= 32; s /= 2) {
+        if (threadIdx.x < s) {
+            shared_sum[threadIdx.x] += shared_sum[threadIdx.x + s];
+            shared_sum_sq[threadIdx.x] += shared_sum_sq[threadIdx.x + s];
+            if (shared_best[threadIdx.x + s] < shared_best[threadIdx.x]) {
+                shared_best[threadIdx.x] = shared_best[threadIdx.x + s];
+            }
+            if (shared_worst[threadIdx.x + s] > shared_worst[threadIdx.x]) {
+                shared_worst[threadIdx.x] = shared_worst[threadIdx.x + s];
+            }
+        }
+        __syncthreads();
+    }
+
+    // Warp reduction for the last 32 threads
+    if (threadIdx.x < 32) {
+        double warp_sum = shared_sum[threadIdx.x];
+        double warp_sum_sq = shared_sum_sq[threadIdx.x];
+        double warp_best = shared_best[threadIdx.x];
+        double warp_worst = shared_worst[threadIdx.x];
+
+        for (int offset = 16; offset > 0; offset /= 2) {
+            warp_sum += __shfl_down_sync(0xFFFFFFFF, warp_sum, offset);
+            warp_sum_sq += __shfl_down_sync(0xFFFFFFFF, warp_sum_sq, offset);
+            double other_best = __shfl_down_sync(0xFFFFFFFF, warp_best, offset);
+            double other_worst = __shfl_down_sync(0xFFFFFFFF, warp_worst, offset);
+            if (other_best < warp_best) {
+                warp_best = other_best;
+            }
+            if (other_worst > warp_worst) {
+                warp_worst = other_worst;
+            }
+        }
+
+        if (threadIdx.x == 0) {
+            double mean = warp_sum / config.population;
+            double stddev = sqrt(warp_sum_sq / config.population - mean * mean);
+            stats[0] = warp_best; // best
+            stats[1] = warp_worst; // worst
+            stats[2] = mean; // average
+            stats[3] = stddev; // stddev
+        }
+    }
+}
+
 } // namespace kernels

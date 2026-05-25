@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include "config.hpp"
+#include "utils.hpp"
 
 #include <cuda_runtime.h>
 #include <curand_kernel.h>
@@ -65,6 +65,15 @@ namespace kernels {
      * @param config The configuration struct containing parameters for elitism.
      */
     __global__ void elitism_kernel(const double* pop, double* new_pop, const double* fitness, Config config);
+
+    /**
+     * @brief CUDA kernel for population statistics.
+     * @param pop The current population of candidate solutions.
+     * @param fitness The array of fitness values for the current population.
+     * @param config The configuration struct containing parameters for statistics calculation.
+     * @param stats The struct to store the computed statistics.
+     */
+     __global__ void statistics_kernel(const double* pop, const double* fitness, Config config, double* stats);
 
 } // namespace kernels
 

@@ -2,7 +2,7 @@ NVCC ?= nvcc
 NVCCFLAGS = -std=c++11 -Iinclude
 LDFLAGS = -lm
 
-HEADERS = include/kernels.cuh include/fitness.cuh include/config.hpp
+HEADERS = include/kernels.cuh include/fitness.cuh include/utils.hpp
 APP_SRCS = $(wildcard src/*.cu) $(wildcard src/*.cpp)
 APP_OBJS = $(patsubst %.cu,%.o,$(filter %.cu,$(APP_SRCS))) \
 	    $(patsubst %.cpp,%.o,$(filter %.cpp,$(APP_SRCS)))

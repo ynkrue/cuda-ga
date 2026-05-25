@@ -6,11 +6,12 @@
  */
 
 #include "kernels.cuh"
-#include "config.hpp"
+#include "utils.hpp"
 
 #include <chrono>
 #include <fstream>
 #include <iostream>
+#include <iomanip>
 #include <string>
 #include <vector>
 #include <cuda_runtime.h>
@@ -21,7 +22,7 @@ using namespace cuga;
 int main(int argc, char** argv) {
 
     if (argc < 2) {
-        std::cerr << "usage: ga config_file \n";
+        std::cerr << "usage: ga <config_file> \n";
         return 1;
     }
     
@@ -30,76 +31,64 @@ int main(int argc, char** argv) {
     config.parse(argv[1]);
     
     // welcome message
-    std::cout << std::string(80, '=') << std::endl << std::endl;
-    std::cout << "              Welcome to the CUDA Genetic Algorithm Optimizer!" << std::endl << std::endl;
-    std::cout << std::string(80, '-') << std::endl;
     config.print();
-    std::cout << std::string(80, '=') << std::endl << std::endl;
 
     /// ========== Initialization ============================================================ ///
     std::cout << "Initializing population..." << std::endl;
+    const auto init_start = std::chrono::steady_clock::now();
     double *h_fitness = new double[config.population];
-    double *d_pop, *d_pop_new, *d_mating_pool, *d_fitness;
+    double *h_stats = new double[4]; // best, worst, average, stddev
+    double *d_pop, *d_pop_new, *d_mating_pool, *d_fitness, *d_stats;
     curandState* d_states;
-    std::ofstream log_file;
-    if (config.file_logging != "") {
-        log_file.open(config.file_logging);
-        if (!log_file.is_open()) {
-            std::cerr << "Error: Could not open log file '" << config.file_logging << "'" << std::endl;
-            return 1;
-        }
-        log_file << "generation,individual";
-        for (int j = 0; j < config.dimension; ++j) {
-            log_file << ",x" << j;
-        }
-        log_file << "\n";
-    }
     cudaMalloc(&d_pop,     config.population * config.dimension * sizeof(double));
     cudaMalloc(&d_pop_new, config.population * config.dimension * sizeof(double));
     cudaMalloc(&d_mating_pool, config.parents * config.dimension * sizeof(double));
     cudaMalloc(&d_fitness, config.population * sizeof(double));
+    cudaMalloc(&d_stats, 4 * sizeof(double));
     cudaMalloc(&d_states,  config.population * sizeof(curandState));
 
     int blockSize = 256;
     int numBlocks = (config.population + blockSize - 1) / blockSize;
     kernels::init_population<<<numBlocks, blockSize>>>(d_pop, d_states, config);
     
+    cudaDeviceSynchronize();
+    const auto init_end = std::chrono::steady_clock::now();
+    const auto init_ms = std::chrono::duration_cast<std::chrono::milliseconds>(init_end - init_start).count();
+    std::cout << "Population initialized with " << config.population << " individuals and " << config.dimension << " dimensions." << std::endl;
+    std::cout << "Initialization finished in " << init_ms << " ms" << std::endl;
+    
     /// ========== Optimization loop ========================================================= ///
+    std::cout << std::endl;
     std::cout << "Starting optimization..." << std::endl;
+    log_header(config);
     const auto optimization_start = std::chrono::steady_clock::now();
-    for (int gen = 0; gen < config.generations; ++gen) {
+    for (int gen = 1; gen < config.generations+1; ++gen) {
+        
         // evaluate fitness
         kernels::fitness_kernel<<<numBlocks, blockSize>>>(d_pop, d_fitness, config);
-
-        // selection, crossover, mutation
+        
+        // selection, crossover, mutation and elitism
         numBlocks = (config.parents + blockSize - 1) / blockSize;
         kernels::selection_kernel<<<numBlocks, blockSize>>>(d_pop, d_mating_pool, d_fitness, d_states, config);
-
+        
         numBlocks = (config.population + blockSize - 1) / blockSize;
         kernels::crossover_kernel<<<numBlocks, blockSize>>>(d_mating_pool, d_pop_new, d_states, config);
-
+        
         kernels::mutation_kernel<<<numBlocks, blockSize>>>(d_pop_new, d_states, config);
-
-        // elitism
+        
         kernels::elitism_kernel<<<1, 1024>>>(d_pop, d_pop_new, d_fitness, config);
-
-
-        if (config.file_logging != "") {
-            double* h_pop = new double[config.population * config.dimension];
-            cudaMemcpy(h_pop, d_pop, config.population * config.dimension * sizeof(double), cudaMemcpyDeviceToHost);
-            for (int i = 0; i < config.population; ++i) {
-                log_file << gen << "," << i;
-                for (int j = 0; j < config.dimension; ++j) {
-                    log_file << "," << h_pop[j * config.population + i];
-                }
-                log_file << "\n";
-            }
-            delete[] h_pop;
-        }
-
+        
         // swap populations
         std::swap(d_pop, d_pop_new);
+        
+        // status update
+        if (gen % config.logging_interval == 0) {
+            kernels::statistics_kernel<<<1, 1024>>>(d_pop, d_fitness, config, d_stats);
+            cudaMemcpy(h_stats, d_stats, 4 * sizeof(double), cudaMemcpyDeviceToHost);
+        }
+        log_stats(config, h_stats, gen);
     }
+    std::cout << std::endl;
     
     // timing
     cudaDeviceSynchronize();
@@ -115,7 +104,6 @@ int main(int argc, char** argv) {
             best_idx = i;
         }
     }
-    std::cout << "Best solution found: \n";
     double* h_pop = new double[config.population * config.dimension];
     cudaMemcpy(h_pop, d_pop, config.population * config.dimension * sizeof(double), cudaMemcpyDeviceToHost);
     for (int j = 0; j < config.dimension; ++j) {
@@ -126,14 +114,13 @@ int main(int argc, char** argv) {
     /// ========== Cleanup ==================================================================== ///
     delete[] h_fitness;
     delete[] h_pop;
+    delete[] h_stats;
     cudaFree(d_pop);
     cudaFree(d_pop_new);
     cudaFree(d_mating_pool);
     cudaFree(d_fitness);
     cudaFree(d_states);
-    if (log_file.is_open()) {
-        log_file.close();
-    }
+    cudaFree(d_stats);
 
     return 0;
 }
