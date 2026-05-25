@@ -38,15 +38,6 @@ static Mode parse_mode(const std::string& val) {
     return Mode::Rosenbrock; // default
 }
 
-// Helper: convert string to Selection enum
-static Selection parse_selection(const std::string& val) {
-    std::string v = trim(val);
-    if (v == "Tournament") return Selection::Tournament;
-    if (v == "Roulette") return Selection::Roulette;
-    if (v == "Truncation") return Selection::Truncation;
-    return Selection::Tournament; // default
-}
-
 void Config::parse(std::string config_file) {
     std::ifstream file(config_file);
     
@@ -81,14 +72,16 @@ void Config::parse(std::string config_file) {
             n_atoms = std::stoi(val);
         } else if (key == "generations") {
             generations = std::stoi(val);
-        } else if (key == "selection") {
-            selection = parse_selection(val);
         } else if (key == "parents") {
             parents = std::stoi(val);
         } else if (key == "tournament_k") {
             tournament_k = std::stoi(val);
-        } else if (key == "elites") {
-            elite_size = std::stoi(val);
+        } else if (key == "elitism") {
+            elitism = (val == "true");
+        } else if (key == "crossover_rate") {
+            crossover_rate = std::stod(val);
+        } else if (key == "crossover_alpha") {
+            crossover_alpha = std::stod(val);
         } else if (key == "mutation_rate") {
             mutation_rate = std::stod(val);
         } else if (key == "seed") {
@@ -119,27 +112,23 @@ void Config::print() const {
     std::cout << "  Population      :: " << population << std::endl;
     if (mode == Mode::LennardJones) {
         std::cout << "  N Atoms     :: " << n_atoms << std::endl;
+    } else {
+        std::cout << "  Dimension       :: " << dimension << std::endl;
     }
-    std::cout << "  Dimension       :: " << dimension << std::endl;
     std::cout << "  Generations     :: " << generations << std::endl;
     std::cout << "  Seed            :: " << seed << std::endl;
     
-    std::cout << "  Selection       :: ";
-    switch (selection) {
-        case Selection::Tournament: std::cout << "Tournament"; break;
-        case Selection::Roulette: std::cout << "Roulette"; break;
-        case Selection::Truncation: std::cout << "Truncation"; break;
-    }
+    std::cout << "  Selection       :: Tournament" << std::endl;
+    std::cout << "  Tournament K    :: " << tournament_k << std::endl;
     std::cout << std::endl;
     
-    if (selection == Selection::Tournament) {
-        std::cout << "  Tournament K    :: " << tournament_k << std::endl;
-    }
-    
     std::cout << "  Parents         :: " << parents << std::endl;
-    std::cout << "  Elite Size      :: " << elite_size << std::endl;
+    if (elitism) {
+        std::cout << "  Elitism         :: enabled" << std::endl;
+    }
+    std::cout << "  Crossover Rate  :: " << crossover_rate << std::endl;
+    std::cout << "  Crossover Alpha :: " << crossover_alpha << std::endl;
     std::cout << "  Mutation Rate   :: " << mutation_rate << std::endl;
-        
     std::cout << "  Init Low        :: " << init_low << std::endl;
     std::cout << "  Init High       :: " << init_high << std::endl;
 

@@ -31,28 +31,30 @@ if len(frames[0][0]) < 2:
     raise SystemExit("Need at least two coordinates to plot")
 
 fig, ax = plt.subplots(figsize=(7, 7))
-scatter = ax.scatter([], [], s=20)
+scatter = ax.scatter([], [], s=30, c="#ffcc33", edgecolors="black", linewidths=0.4, alpha=0.95, zorder=4)
 
 xs = [point[0] for frame in frames for point in frame]
 ys = [point[1] for frame in frames for point in frame]
-pad_x = (max(xs) - min(xs)) * 0.1 or 1.0
-pad_y = (max(ys) - min(ys)) * 0.1 or 1.0
 
-x_min = min(min(xs) - pad_x, 1.0 - pad_x)
-x_max = max(max(xs) + pad_x, 1.0 + pad_x)
-y_min = min(min(ys) - pad_y, 1.0 - pad_y)
-y_max = max(max(ys) + pad_y, 1.0 + pad_y)
+x_min, x_max = -2.0, 2.0
+y_min, y_max = -1.0, 3.0
 
-grid_x = [x_min + (x_max - x_min) * i / 200 for i in range(201)]
-grid_y = [y_min + (y_max - y_min) * i / 200 for i in range(201)]
+grid_x = np.linspace(x_min, x_max, 400)
+grid_y = np.linspace(y_min, y_max, 400)
 X, Y = np.meshgrid(grid_x, grid_y)
 Z = (1 - X) ** 2 + 100 * (Y - X ** 2) ** 2
 
-ax.contour(X, Y, Z, levels=20, linewidths=0.7, colors="0.7")
-ax.scatter([1.0], [1.0], marker="*", s=120, c="red", zorder=3)
+low_levels = np.linspace(0.0, 11.0, 8)
+high_levels = np.logspace(np.log10(11.0), np.log10(Z.max()), 10)
+levels = np.unique(np.concatenate([low_levels, high_levels]))
+
+ax.contourf(X, Y, Z, levels=levels, cmap="viridis", extend="max")
+ax.contour(X, Y, Z, levels=levels, linewidths=0.7, colors="white", alpha=0.85)
+ax.scatter([1.0], [1.0], marker="*", s=120, c="red", zorder=5)
 
 ax.set_xlim(x_min, x_max)
 ax.set_ylim(y_min, y_max)
+ax.set_aspect("equal", adjustable="box")
 ax.set_xlabel(x_cols[0])
 ax.set_ylabel(x_cols[1])
 title = ax.set_title("")

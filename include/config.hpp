@@ -12,8 +12,6 @@ namespace cuga {
 
 enum class Mode { Rosenbrock, LennardJones };
 
-enum class Selection { Tournament, Roulette, Truncation };
-
 struct Config {
     Mode   mode           = Mode::Rosenbrock;
     int    population     = 200;
@@ -22,14 +20,15 @@ struct Config {
     int    generations    = 500;
     int    seed           = 42;
 
-    Selection selection   = Selection::Tournament;
     int    parents        = -1;
     int    tournament_k   = 5;
 
-    double crossover_rate  = 0.4;
+    double crossover_rate  = 0.8;
+    double crossover_alpha = 0.5;
+
     double mutation_rate  = 0.3;
 
-    int elite_size        = 0;
+    bool elitism          = false;
 
     double init_low       = -2.0;
     double init_high      =  2.0;

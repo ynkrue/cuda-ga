@@ -39,29 +39,21 @@ __global__ void selection_kernel(const double* pop, double* mating_pool, const d
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= config.parents) return;
 
-    // Tournament selection
-    if (config.selection == Selection::Tournament) {
-        // loop over k competitors and select the best one
-        int best_idx = curand(&states[idx]) % config.population;
-        double best_fit = fitness[best_idx];
-        for (int i = 1; i < config.tournament_k; ++i) {
-            int competitor_idx = curand(&states[idx]) % config.population;
-            if (fitness[competitor_idx] < best_fit) {
-                best_idx = competitor_idx;
-                best_fit = fitness[competitor_idx];
-            }
-        }
-        // copy the selected parent to new population
-        for (int j = 0; j < config.dimension; ++j) {
-            mating_pool[j * config.parents + idx] = pop[j * config.population + best_idx];
-        }
-
-    // Other selection
-    } else {
-        for (int j = 0; j < config.dimension; ++j) {
-            mating_pool[j * config.parents + idx] = pop[j * config.population + idx];
+    // loop over k competitors and select the best one
+    int best_idx = curand(&states[idx]) % config.population;
+    double best_fit = fitness[best_idx];
+    for (int i = 1; i < config.tournament_k; ++i) {
+        int competitor_idx = curand(&states[idx]) % config.population;
+        if (fitness[competitor_idx] < best_fit) {
+            best_idx = competitor_idx;
+            best_fit = fitness[competitor_idx];
         }
     }
+    // copy the selected parent to new population
+    for (int j = 0; j < config.dimension; ++j) {
+        mating_pool[j * config.parents + idx] = pop[j * config.population + best_idx];
+    }
+
 }
 
 __global__ void crossover_kernel(const double* mating_pool, double* new_pop, curandState* states, Config config) {
@@ -77,14 +69,22 @@ __global__ void crossover_kernel(const double* mating_pool, double* new_pop, cur
     int parent_a_idx = curand(&states[idx]) % config.parents;
     int parent_b_idx = curand(&states[idx]) % config.parents;
 
-    // loop over dimensions and perform blend crossover
+    bool do_crossover = curand_uniform_double(&states[idx]) < config.crossover_rate;
+
+    // loop over dimensions and perform blx alpha crossover
     for (int j = 0; j < config.dimension; ++j) {
         double gene_a = mating_pool[j * config.parents + parent_a_idx];
         double gene_b = mating_pool[j * config.parents + parent_b_idx];
-        
-        double alpha = curand_uniform_double(&states[idx]);
-        new_pop[j * config.population + child_a_idx] = alpha * gene_a + (1.0 - alpha) * gene_b;
-        new_pop[j * config.population + child_b_idx] = alpha * gene_b + (1.0 - alpha) * gene_a;
+        if (do_crossover) {
+            double low = fmin(gene_a, gene_b) - config.crossover_alpha * fabs(gene_a - gene_b);
+            double high = fmax(gene_a, gene_b) + config.crossover_alpha * fabs(gene_a - gene_b);
+            new_pop[j * config.population + child_a_idx] = low + (high - low) * curand_uniform_double(&states[idx]);
+            new_pop[j * config.population + child_b_idx] = low + (high - low) * curand_uniform_double(&states[idx]);
+        } else {
+            // no crossover, just copy parents
+            new_pop[j * config.population + child_a_idx] = gene_a;
+            new_pop[j * config.population + child_b_idx] = gene_b;
+        }
     }
 }
 
