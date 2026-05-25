@@ -123,6 +123,17 @@ int main(int argc, char** argv) {
     }
     std::cout << "Best fitness: " << h_fitness[best_idx] << std::endl;
 
+    /// ========== Cleanup ==================================================================== ///
+    delete[] h_fitness;
+    delete[] h_pop;
+    cudaFree(d_pop);
+    cudaFree(d_pop_new);
+    cudaFree(d_mating_pool);
+    cudaFree(d_fitness);
+    cudaFree(d_states);
+    if (log_file.is_open()) {
+        log_file.close();
+    }
 
     return 0;
 }

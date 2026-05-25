@@ -12,6 +12,7 @@
 #include <sstream>
 #include <cctype>
 #include <algorithm>
+#include <cmath>
 
 namespace cuga {
 
@@ -86,10 +87,6 @@ void Config::parse(std::string config_file) {
             mutation_rate = std::stod(val);
         } else if (key == "seed") {
             seed = std::stoi(val);
-        } else if (key == "init_low") {
-            init_low = std::stod(val);
-        } else if (key == "init_high") {
-            init_high = std::stod(val);
         } else if (key == "dimension") {
             dimension = std::stoi(val);
         } else if (key == "file_logging") {
@@ -102,6 +99,17 @@ void Config::parse(std::string config_file) {
     if (parents < 0) {
         parents = population;
     }
+
+    if (mode == Mode::LennardJones) {
+        dimension = 3 * n_atoms;
+        crossover_alpha = 0.0;
+        double half_width = 0.7 * std::cbrt((double)n_atoms);
+        init_low  = -half_width;
+        init_high =  half_width;
+    } else if (mode == Mode::Rosenbrock) {
+        init_low = -3.0;
+        init_high = 5.0;
+    }
     
     file.close();
 }
@@ -111,7 +119,8 @@ void Config::print() const {
     std::cout << "  Mode            :: " << (mode == Mode::Rosenbrock ? "Rosenbrock" : "LennardJones") << std::endl;
     std::cout << "  Population      :: " << population << std::endl;
     if (mode == Mode::LennardJones) {
-        std::cout << "  N Atoms     :: " << n_atoms << std::endl;
+        std::cout << "  N Atoms         :: " << n_atoms << std::endl;
+        std::cout << "  Dimension       :: " << dimension << std::endl;
     } else {
         std::cout << "  Dimension       :: " << dimension << std::endl;
     }
@@ -127,7 +136,9 @@ void Config::print() const {
         std::cout << "  Elitism         :: enabled" << std::endl;
     }
     std::cout << "  Crossover Rate  :: " << crossover_rate << std::endl;
-    std::cout << "  Crossover Alpha :: " << crossover_alpha << std::endl;
+    if (mode == Mode::Rosenbrock) {
+        std::cout << "  Crossover Alpha :: " << crossover_alpha << std::endl;
+    }
     std::cout << "  Mutation Rate   :: " << mutation_rate << std::endl;
     std::cout << "  Init Low        :: " << init_low << std::endl;
     std::cout << "  Init High       :: " << init_high << std::endl;

@@ -11,7 +11,7 @@
 namespace cuga::kernels {
 
 __global__ void init_population(double* pop, curandState* states, const Config config) {
-        int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= config.population) return;
     // Initialize the random state for each thread
     curandState state;
@@ -29,8 +29,7 @@ __global__ void fitness_kernel(const double* pop, double* fitness, Config config
     if (config.mode == Mode::Rosenbrock) {
         fitness[idx] = rosenbrock(pop, idx, config.population, config.dimension);
     } else {
-        // Implement other fitness functions as needed
-        fitness[idx] = 0.0; // Placeholder
+        fitness[idx] = lennard_jones(pop, idx, config.population, config.dimension);
     }
 }
 

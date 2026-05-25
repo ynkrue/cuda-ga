@@ -7,4 +7,5 @@
 
 # build
 *.o
-ga
+bin/
+build/
