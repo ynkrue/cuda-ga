@@ -16,23 +16,25 @@ enum class Selection { Tournament, Roulette, Truncation };
 
 struct Config {
     Mode   mode           = Mode::Rosenbrock;
-    int    population     = 4096;
+    int    population     = 200;
     int    n_atoms        = 13;
     int    dimension = 2;
     int    generations    = 500;
     int    seed           = 42;
 
     Selection selection   = Selection::Tournament;
-    int    parents        = 4096;
-    int    tournament_k   = 2;
+    int    parents        = -1;
+    int    tournament_k   = 5;
 
     double crossover_rate  = 0.4;
-    double mutation_rate  = 0.01;
+    double mutation_rate  = 0.3;
 
     int elite_size        = 0;
 
     double init_low       = -2.0;
     double init_high      =  2.0;
+
+    std::string file_logging = "";
 
     void parse(std::string config_file);
     void print() const;

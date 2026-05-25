@@ -73,7 +73,9 @@ void Config::parse(std::string config_file) {
         std::string val = trim(line.substr(pos + 1));
         
         // Parse key-value pairs
-        if (key == "population") {
+        if (key == "mode") {
+            mode = parse_mode(val);
+        } else if (key == "population") {
             population = std::stoi(val);
         } else if (key == "n_atoms") {
             n_atoms = std::stoi(val);
@@ -85,7 +87,7 @@ void Config::parse(std::string config_file) {
             parents = std::stoi(val);
         } else if (key == "tournament_k") {
             tournament_k = std::stoi(val);
-        } else if (key == "elite_size") {
+        } else if (key == "elites") {
             elite_size = std::stoi(val);
         } else if (key == "mutation_rate") {
             mutation_rate = std::stod(val);
@@ -97,9 +99,15 @@ void Config::parse(std::string config_file) {
             init_high = std::stod(val);
         } else if (key == "dimension") {
             dimension = std::stoi(val);
+        } else if (key == "file_logging") {
+            file_logging = val;
         } else {
             std::cerr << "Warning: Unrecognized config key '" << key << "' in file '" << config_file << "'" << std::endl;
         }
+    }
+
+    if (parents < 0) {
+        parents = population;
     }
     
     file.close();
@@ -134,6 +142,8 @@ void Config::print() const {
         
     std::cout << "  Init Low        :: " << init_low << std::endl;
     std::cout << "  Init High       :: " << init_high << std::endl;
+
+    std::cout << "  File Logging    :: " << (file_logging.empty() ? "None" : file_logging) << std::endl;
 }
 
 } // namespace cuga

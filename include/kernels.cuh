@@ -58,13 +58,13 @@ namespace kernels {
     __global__ void mutation_kernel(double* pop, curandState* states, Config config);
 
     /**
-     * @brief Function for the elitism operation on CPU for now.
+     * @brief CUDA kernel for the elitism operation.
      * @param pop The current population of candidate solutions.
      * @param new_pop The new population to which the elite individuals will be copied.
      * @param fitness The array of fitness values for the current population.
      * @param config The configuration struct containing parameters for elitism.
      */
-    void elitism_kernel(const double* pop, double* new_pop, const double* fitness, Config config);
+    __global__ void elitism_kernel(const double* pop, double* new_pop, const double* fitness, Config config);
 
 } // namespace kernels
 

@@ -102,11 +102,66 @@ __global__ void mutation_kernel(double* pop, curandState* states, Config config)
     }
 }
 
-void elitism_kernel(const double* pop, double* new_pop, const double* fitness, Config config) {
-    (void)pop; // Unused parameter
-    (void)new_pop; // Unused parameter
-    (void)fitness; // Unused parameter
-    (void)config; // Unused parameter
+__global__ void elitism_kernel(const double* pop, double* new_pop, const double* fitness, Config config) {
+    /// Elitism
+    int best_idx = threadIdx.x;
+    double best_fit = 1e9;
+    
+    // thread search best with stride of blockDim.x
+    for (int i = threadIdx.x; i < config.population; i += blockDim.x) {
+        if (fitness[i] < best_fit) {
+            best_fit = fitness[i];
+            best_idx = i;
+        }
+    }
+
+    // Block reduction: reduce from 1024 to 32 threads
+    __shared__ double shared_fit[1024];
+    __shared__ int shared_idx[1024];
+    shared_fit[threadIdx.x] = best_fit;
+    shared_idx[threadIdx.x] = best_idx;
+    __syncthreads();
+    
+    // Parallel block reduction step
+    for (int s = blockDim.x / 2; s >= 32; s /= 2) {
+        if (threadIdx.x < s) {
+            if (shared_fit[threadIdx.x + s] < shared_fit[threadIdx.x]) {
+                shared_fit[threadIdx.x] = shared_fit[threadIdx.x + s];
+                shared_idx[threadIdx.x] = shared_idx[threadIdx.x + s];
+            }
+        }
+        __syncthreads();
+    }
+    
+    // Warp reduction for the last 32 threads
+    if (threadIdx.x < 32) {
+        double warp_fit = shared_fit[threadIdx.x];
+        int warp_idx = shared_idx[threadIdx.x];
+        
+        for (int offset = 16; offset > 0; offset /= 2) {
+            double other_fit = __shfl_down_sync(0xFFFFFFFF, warp_fit, offset);
+            int other_idx = __shfl_down_sync(0xFFFFFFFF, warp_idx, offset);
+            if (other_fit < warp_fit) {
+                warp_fit = other_fit;
+                warp_idx = other_idx;
+            }
+        }
+        
+        // Thread 0 of warp stores result back
+        if (threadIdx.x == 0) {
+            shared_fit[0] = warp_fit;
+            shared_idx[0] = warp_idx;
+        }
+    }
+    __syncthreads();
+    
+    // Thread 0 copies the elite individual to new_pop[0]
+    if (threadIdx.x == 0) {
+        int best = shared_idx[0];
+        for (int j = 0; j < config.dimension; ++j) {
+            new_pop[j * config.population + 0] = pop[j * config.population + best];
+        }
+    }
 }
 
 } // namespace kernels
