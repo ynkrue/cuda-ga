@@ -9,6 +9,8 @@
 
 #include <cuda_runtime.h>
 
+namespace cuga {
+
 /**
  * @brief Computes the Rosenbrock function value for a given point.
  * @param pop The population array.
@@ -65,3 +67,5 @@ __device__ __inline__ double lennard_jones(const double* pop, int idx, int pop_s
 
     return energy;
 }
+
+} // namespace cuga

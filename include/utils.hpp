@@ -1,6 +1,6 @@
 /**
- * @file config.hpp
- * @brief Configuration struct for the CUDA genetic algorithm.
+ * @file utils.hpp
+ * @brief Utility functions for the CUDA genetic algorithm.
  *
  * @author Yannik Rüfenacht
  */
@@ -23,12 +23,12 @@ struct Config {
     int    seed           = 42;
 
     // selection, crossover, mutation and elitism parameters
-    int    parents        = -1;
-    int    tournament_k   = 5;
+    int    parents         = -1;
+    int    tournament_k    = 5;
     double crossover_rate  = 0.8;
     double crossover_alpha = 0.5;
-    double mutation_rate  = 0.3;
-    bool elitism          = false;
+    double mutation_rate   = 0.3;
+    bool elitism           = false;
 
     // parameter space parameters
     double init_low       = -2.0;

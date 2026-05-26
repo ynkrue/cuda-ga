@@ -1,6 +1,6 @@
 /**
- * @file config.cpp
- * @brief Implementation of the configuration struct parser for the CUDA genetic algorithm.
+ * @file utils.cpp
+ * @brief Implementation of utility functions for the CUDA genetic algorithm.
  *
  * @author Yannik Rüfenacht
  */
@@ -106,6 +106,7 @@ void Config::parse(std::string config_file) {
     if (mode == Mode::LennardJones) {
         dimension = 3 * n_atoms;
         double half_width = 0.7 * std::cbrt((double)n_atoms);
+        crossover_alpha = 0.0;
         init_low  = -half_width;
         init_high =  half_width;
     } else if (mode == Mode::Rosenbrock) {
@@ -135,7 +136,10 @@ void Config::print() const {
     std::cout << "  Selection        :: Tournament" << std::endl;
     std::cout << "  Tournament K     :: " << tournament_k << std::endl;
     std::cout << "  Crossover Rate   :: " << crossover_rate << std::endl;
-    std::cout << "  Crossover Alpha  :: " << crossover_alpha << std::endl;
+    std::cout << "  Crossover Type   :: " << (crossover_alpha > 0.0 ? "Blending (BLX-alpha)" : "Cut and Splice") << std::endl;
+    if (crossover_alpha > 0.0) {
+        std::cout << "  Crossover Alpha  :: " << crossover_alpha << std::endl;
+    }
     std::cout << "  Mutation Rate    :: " << mutation_rate << std::endl;
     if (elitism) {
         std::cout << "  Elitism          :: enabled" << std::endl;
@@ -150,10 +154,10 @@ void Config::print() const {
 
 void log_header(const Config& config) {
     std::cout << std::string(80, '-') << std::endl;
-    std::cout << std::left << std::setw(14) << "Gen" << " | "
+    std::cout << std::left << std::setw(18) << "Gen" << " | "
               << std::right << std::setw(12) << "Best" << " | "
+              << std::setw(12) << "Worst" << " | "
               << std::setw(12) << "Avg" << " | "
-              << std::setw(12) << "Median" << " | "
               << std::setw(11) << "StdDev" << std::endl;
     std::cout << std::string(80, '-') << std::endl;
 }
@@ -166,12 +170,12 @@ void log_stats(const Config& config, double* stats, int gen) {
     };
 
     if (gen % config.logging_interval == 0) {
-        std::cout << "\r[" << std::setw(std::to_string(config.generations).length()) << std::right << gen << "/" << config.generations << "]"
+        std::cout << "\r[" << std::setw(12) << std::right << gen << "/" << config.generations << "]"
                     << "  |" << format_stat(stats[0]) << "  |" << format_stat(stats[1])
                     << "  |" << format_stat(stats[2]) << "  |" << format_stat(stats[3]) 
                     << std::endl << std::flush;
     } else {
-        std::cout << "\r[" << std::setw(std::to_string(config.generations).length()) << std::right << gen << "/" << config.generations << "]" << std::flush;
+        std::cout << "\r[" << std::setw(12) << std::right << gen << "/" << config.generations << "]" << std::flush;
     }
 }
 

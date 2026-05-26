@@ -8,18 +8,30 @@
 // needs the lj_energy() definition from the header.
 
 #include "fitness.cuh"
+#include "crossover.cuh"
 
 #include <cuda_runtime.h>
 #include <cstdio>
 #include <cmath>
 #include <vector>
 
+// /// Test kernel to call COM function (uses AoS layout: [x0,y0,z0, x1,y1,z1, ...])
+// __global__ void test_com_kernel_aos(const double* points, double* out, int n_points) {
+//     double cx = 0.0, cy = 0.0, cz = 0.0;
+//     cuga::center_of_mass(points, n_points, &cx, &cy, &cz);
+//     if (threadIdx.x == 0 && blockIdx.x == 0) {
+//         out[0] = cx;
+//         out[1] = cy;
+//         out[2] = cz;
+//     }
+// }
+
 /// Test kernel to call LJ energy function
 __global__ void test_lj_kernel(const double* pop, double* out,
                                 int population, int dim) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= population) return;
-    out[idx] = lennard_jones(pop, idx, population, dim);
+    out[idx] = cuga::lennard_jones(pop, idx, population, dim);
 }
 
 static std::vector<double> run_lj(const std::vector<std::vector<double>>& clusters,
@@ -106,6 +118,26 @@ int main() {
     std::vector<double> e3 = run_lj(three, 3);
 
     check_near("equilateral triangle",  e3[0], -3.0, 1e-9);
+
+    // // n_atoms = 2, dim = 6, one individual 
+    // std::vector<double> com_in = { 0,0,0,  2,4,6 };
+    // double *d_points = nullptr, *d_com_out = nullptr;
+    // cudaMalloc(&d_points, sizeof(double) * com_in.size());
+    // cudaMemcpy(d_points, com_in.data(), sizeof(double) * com_in.size(), cudaMemcpyHostToDevice);
+    // cudaMalloc(&d_com_out, sizeof(double) * 3);
+
+    // test_com_kernel_aos<<<1,1>>>(d_points, d_com_out, 2);
+    // cudaDeviceSynchronize();
+
+    // double h_com[3] = {0.0, 0.0, 0.0};
+    // cudaMemcpy(h_com, d_com_out, sizeof(double) * 3, cudaMemcpyDeviceToHost);
+
+    // check_near("COM x", h_com[0], 1.0, 1e-9);
+    // check_near("COM y", h_com[1], 2.0, 1e-9);
+    // check_near("COM z", h_com[2], 3.0, 1e-9);
+
+    // cudaFree(d_points);
+    // cudaFree(d_com_out);
 
     // ---- summary ----
     printf("\n%s  (%d failure%s)\n",

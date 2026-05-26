@@ -36,6 +36,8 @@ int main(int argc, char** argv) {
     /// ========== Initialization ============================================================ ///
     std::cout << "Initializing population..." << std::endl;
     const auto init_start = std::chrono::steady_clock::now();
+
+    // allocate memory on host and device
     double *h_fitness = new double[config.population];
     double *h_stats = new double[4]; // best, worst, average, stddev
     double *d_pop, *d_pop_new, *d_mating_pool, *d_fitness, *d_stats;
@@ -47,34 +49,36 @@ int main(int argc, char** argv) {
     cudaMalloc(&d_stats, 4 * sizeof(double));
     cudaMalloc(&d_states,  config.population * sizeof(curandState));
 
-    int blockSize = 256;
-    int numBlocks = (config.population + blockSize - 1) / blockSize;
-    kernels::init_population<<<numBlocks, blockSize>>>(d_pop, d_states, config);
-    
+    // initialize population
+    int numThreads = 256;
+    int numBlocks = (config.population + numThreads - 1) / numThreads;
+    kernels::init_population<<<numBlocks, numThreads>>>(d_pop, d_states, config);
     cudaDeviceSynchronize();
+    
     const auto init_end = std::chrono::steady_clock::now();
     const auto init_ms = std::chrono::duration_cast<std::chrono::milliseconds>(init_end - init_start).count();
     std::cout << "Population initialized with " << config.population << " individuals and " << config.dimension << " dimensions." << std::endl;
     std::cout << "Initialization finished in " << init_ms << " ms" << std::endl;
     
     /// ========== Optimization loop ========================================================= ///
-    std::cout << std::endl;
     std::cout << "Starting optimization..." << std::endl;
     log_header(config);
+
+    // generation loop
     const auto optimization_start = std::chrono::steady_clock::now();
     for (int gen = 1; gen < config.generations+1; ++gen) {
         
         // evaluate fitness
-        kernels::fitness_kernel<<<numBlocks, blockSize>>>(d_pop, d_fitness, config);
+        kernels::fitness_kernel<<<numBlocks, numThreads>>>(d_pop, d_fitness, config);
         
         // selection, crossover, mutation and elitism
-        numBlocks = (config.parents + blockSize - 1) / blockSize;
-        kernels::selection_kernel<<<numBlocks, blockSize>>>(d_pop, d_mating_pool, d_fitness, d_states, config);
+        numBlocks = (config.parents + numThreads - 1) / numThreads;
+        kernels::selection_kernel<<<numBlocks, numThreads>>>(d_pop, d_mating_pool, d_fitness, d_states, config);
         
-        numBlocks = (config.population + blockSize - 1) / blockSize;
-        kernels::crossover_kernel<<<numBlocks, blockSize>>>(d_mating_pool, d_pop_new, d_states, config);
+        numBlocks = (config.population + numThreads - 1) / numThreads;
+        kernels::crossover_kernel<<<numBlocks, numThreads>>>(d_mating_pool, d_pop_new, d_states, config);
         
-        kernels::mutation_kernel<<<numBlocks, blockSize>>>(d_pop_new, d_states, config);
+        kernels::mutation_kernel<<<numBlocks, numThreads>>>(d_pop_new, d_states, config);
         
         kernels::elitism_kernel<<<1, 1024>>>(d_pop, d_pop_new, d_fitness, config);
         

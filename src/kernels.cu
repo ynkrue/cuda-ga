@@ -7,6 +7,7 @@
 
 #include "kernels.cuh"
 #include "fitness.cuh"
+#include "crossover.cuh"
 
 namespace cuga::kernels {
 
@@ -52,51 +53,40 @@ __global__ void selection_kernel(const double* pop, double* mating_pool, const d
     for (int j = 0; j < config.dimension; ++j) {
         mating_pool[j * config.parents + idx] = pop[j * config.population + best_idx];
     }
-
 }
 
 __global__ void crossover_kernel(const double* mating_pool, double* new_pop, curandState* states, Config config) {
     /// Crossover
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     
-    // each thread produces two children
-    int child_a_idx = 2 * idx;
-    int child_b_idx = 2 * idx + 1;
-    if (child_b_idx >= config.population) return;
-
-    // select two parents randomly
-    int parent_a_idx = curand(&states[idx]) % config.parents;
-    int parent_b_idx = curand(&states[idx]) % config.parents;
-
-    bool do_crossover = curand_uniform_double(&states[idx]) < config.crossover_rate;
-
-    // loop over dimensions and perform blx alpha crossover
-    for (int j = 0; j < config.dimension; ++j) {
-        double gene_a = mating_pool[j * config.parents + parent_a_idx];
-        double gene_b = mating_pool[j * config.parents + parent_b_idx];
-        if (do_crossover) {
-            double low = fmin(gene_a, gene_b) - config.crossover_alpha * fabs(gene_a - gene_b);
-            double high = fmax(gene_a, gene_b) + config.crossover_alpha * fabs(gene_a - gene_b);
-            new_pop[j * config.population + child_a_idx] = low + (high - low) * curand_uniform_double(&states[idx]);
-            new_pop[j * config.population + child_b_idx] = low + (high - low) * curand_uniform_double(&states[idx]);
-        } else {
-            // no crossover, just copy parents
-            new_pop[j * config.population + child_a_idx] = gene_a;
-            new_pop[j * config.population + child_b_idx] = gene_b;
-        }
+    if (config.mode == Mode::Rosenbrock) {
+        blending(mating_pool, new_pop, idx, states, config);
+    } else {
+        cut_and_splice(mating_pool, new_pop, idx, states, config);
     }
 }
 
 __global__ void mutation_kernel(double* pop, curandState* states, Config config) {
-    /// Mutation
+    // Mutation
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= config.population) return;
 
-    for (int j = 0; j < config.dimension; ++j) {
+    if (config.mode == Mode::Rosenbrock) {
+        for (int j = 0; j < config.dimension; ++j) {
+            if (curand_uniform_double(&states[idx]) < config.mutation_rate) {
+                double m = (curand_uniform_double(&states[idx]) - 0.5) * 0.2;
+                pop[j * config.population + idx] += m;
+            }
+        }
+    } else {
+        // displace one random atom
         if (curand_uniform_double(&states[idx]) < config.mutation_rate) {
-            // add small random value to gene
-            double mutation = (curand_uniform_double(&states[idx]) - 0.5) * 0.2; // mutation in range [-0.1, 0.1]
-            pop[j * config.population + idx] += mutation;
+            int a = curand(&states[idx]) % config.n_atoms;
+            double span = config.init_high - config.init_low;
+            for (int c = 0; c < 3; ++c) {
+                pop[(3*a + c) * config.population + idx]
+                    = config.init_low + span * curand_uniform_double(&states[idx]);
+            }
         }
     }
 }
