@@ -6,11 +6,11 @@
  */
 
 #include "kernels.cuh"
-#include "fitness.cuh"
 #include "crossover.cuh"
 
 namespace cuga::kernels {
 
+/// Initialization
 __global__ void init_population(double* pop, curandState* states, const Config config) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= config.population) return;
@@ -24,18 +24,42 @@ __global__ void init_population(double* pop, curandState* states, const Config c
     }
 }
 
+/// Fitness evaluation
 __global__ void fitness_kernel(const double* pop, double* fitness, Config config) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= config.population) return;
-    if (config.mode == Mode::Rosenbrock) {
-        fitness[idx] = rosenbrock(pop, idx, config.population, config.dimension);
-    } else {
-        fitness[idx] = lennard_jones(pop, idx, config.population, config.dimension);
+    
+    const double R2_FLOOR = 0.5;     // singularity guard, in sigma^2 units
+    double energy = 0.0;
+    int n_atoms = config.dimension / 3;
+
+    // loop over atoms
+    for (int a = 0; a < n_atoms; ++a) {
+        double xa = pop[(3*a + 0) * config.population + idx];
+        double ya = pop[(3*a + 1) * config.population + idx];
+        double za = pop[(3*a + 2) * config.population + idx];
+
+        // loop over other atoms
+        for (int b = a + 1; b < n_atoms; ++b) {
+            double dx = xa - pop[(3*b + 0) * config.population + idx];
+            double dy = ya - pop[(3*b + 1) * config.population + idx];
+            double dz = za - pop[(3*b + 2) * config.population + idx];
+
+            double r2 = dx*dx + dy*dy + dz*dz;
+            r2 = fmax(r2, R2_FLOOR);
+
+            double r2_inv = 1.0 / r2;
+            double r6_inv = r2_inv * r2_inv * r2_inv;
+            double r12_inv = r6_inv * r6_inv;
+
+            energy += 4.0 * (r12_inv - r6_inv);
+        }
     }
+    fitness[idx] = energy;
 }
 
+/// Selection
 __global__ void selection_kernel(const double* pop, double* mating_pool, const double* fitness, curandState* states, Config config) {
-    /// Selection
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= config.parents) return;
 
@@ -55,44 +79,29 @@ __global__ void selection_kernel(const double* pop, double* mating_pool, const d
     }
 }
 
+/// Crossover
 __global__ void crossover_kernel(const double* mating_pool, double* new_pop, curandState* states, Config config) {
-    /// Crossover
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    
-    if (config.mode == Mode::Rosenbrock) {
-        blending(mating_pool, new_pop, idx, states, config);
-    } else {
-        cut_and_splice(mating_pool, new_pop, idx, states, config);
-    }
+    cut_and_splice(mating_pool, new_pop, idx, states, config);
 }
 
+/// Mutation
 __global__ void mutation_kernel(double* pop, curandState* states, Config config) {
-    // Mutation
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= config.population) return;
 
-    if (config.mode == Mode::Rosenbrock) {
-        for (int j = 0; j < config.dimension; ++j) {
-            if (curand_uniform_double(&states[idx]) < config.mutation_rate) {
-                double m = (curand_uniform_double(&states[idx]) - 0.5) * 0.2;
-                pop[j * config.population + idx] += m;
-            }
-        }
-    } else {
-        // displace one random atom
-        if (curand_uniform_double(&states[idx]) < config.mutation_rate) {
-            int a = curand(&states[idx]) % config.n_atoms;
-            double span = config.init_high - config.init_low;
-            for (int c = 0; c < 3; ++c) {
-                pop[(3*a + c) * config.population + idx]
-                    = config.init_low + span * curand_uniform_double(&states[idx]);
-            }
+    if (curand_uniform_double(&states[idx]) < config.mutation_rate) {
+        int a = curand(&states[idx]) % config.n_atoms;
+        double span = config.init_high - config.init_low;
+        for (int c = 0; c < 3; ++c) {
+            pop[(3*a + c) * config.population + idx]
+                = config.init_low + span * curand_uniform_double(&states[idx]);
         }
     }
 }
 
+/// Elitism
 __global__ void elitism_kernel(const double* pop, double* new_pop, const double* fitness, Config config) {
-    /// Elitism
     int best_idx = threadIdx.x;
     double best_fit = 1e9;
     
@@ -153,8 +162,8 @@ __global__ void elitism_kernel(const double* pop, double* new_pop, const double*
     }
 }
 
+/// Statistics
 __global__ void statistics_kernel(const double* pop, const double* fitness, Config config, double* stats) {
-    /// Statistics
     double sum = 0.0;
     double sum_sq = 0.0;
     double best_fit = 1e9;

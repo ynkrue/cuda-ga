@@ -1,5 +1,5 @@
 /**
- * @file main.cpp
+ * @file main.cu
  * @brief Main entry point for the cuda genetic algorithm optimizer.
  *
  * @author Yannik Rüfenacht
@@ -51,8 +51,9 @@ int main(int argc, char** argv) {
 
     // initialize population
     int numThreads = 256;
-    int numBlocks = (config.population + numThreads - 1) / numThreads;
-    kernels::init_population<<<numBlocks, numThreads>>>(d_pop, d_states, config);
+    int numBlocks_population = (config.population + numThreads - 1) / numThreads;
+    int numBlocks_mating = (config.parents + numThreads - 1) / numThreads;
+    kernels::init_population<<<numBlocks_population, numThreads>>>(d_pop, d_states, config);
     cudaDeviceSynchronize();
     
     const auto init_end = std::chrono::steady_clock::now();
@@ -69,17 +70,12 @@ int main(int argc, char** argv) {
     for (int gen = 1; gen < config.generations+1; ++gen) {
         
         // evaluate fitness
-        kernels::fitness_kernel<<<numBlocks, numThreads>>>(d_pop, d_fitness, config);
+        kernels::fitness_kernel<<<numBlocks_population, numThreads>>>(d_pop, d_fitness, config);
         
         // selection, crossover, mutation and elitism
-        numBlocks = (config.parents + numThreads - 1) / numThreads;
-        kernels::selection_kernel<<<numBlocks, numThreads>>>(d_pop, d_mating_pool, d_fitness, d_states, config);
-        
-        numBlocks = (config.population + numThreads - 1) / numThreads;
-        kernels::crossover_kernel<<<numBlocks, numThreads>>>(d_mating_pool, d_pop_new, d_states, config);
-        
-        kernels::mutation_kernel<<<numBlocks, numThreads>>>(d_pop_new, d_states, config);
-        
+        kernels::selection_kernel<<<numBlocks_mating, numThreads>>>(d_pop, d_mating_pool, d_fitness, d_states, config);
+        kernels::crossover_kernel<<<numBlocks_population, numThreads>>>(d_mating_pool, d_pop_new, d_states, config);        
+        kernels::mutation_kernel<<<numBlocks_population, numThreads>>>(d_pop_new, d_states, config);
         kernels::elitism_kernel<<<1, 1024>>>(d_pop, d_pop_new, d_fitness, config);
         
         // swap populations
@@ -92,9 +88,7 @@ int main(int argc, char** argv) {
         }
         log_stats(config, h_stats, gen);
     }
-    std::cout << std::endl;
     
-    // timing
     cudaDeviceSynchronize();
     const auto optimization_end = std::chrono::steady_clock::now();
     const auto optimization_ms = std::chrono::duration_cast<std::chrono::milliseconds>(optimization_end - optimization_start).count();

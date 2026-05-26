@@ -1,36 +1,29 @@
-NVCC ?= nvcc
-NVCCFLAGS = -std=c++11 -Iinclude
-LDFLAGS = -lm
+NVCC      ?= nvcc
+NVCCFLAGS  = -std=c++11 -Iinclude
+LDFLAGS    = -lm
 
-HEADERS = include/kernels.cuh include/fitness.cuh include/utils.hpp
-APP_SRCS = $(wildcard src/*.cu) $(wildcard src/*.cpp)
-APP_OBJS = $(patsubst %.cu,%.o,$(filter %.cu,$(APP_SRCS))) \
-	    $(patsubst %.cpp,%.o,$(filter %.cpp,$(APP_SRCS)))
-TEST_SRC = $(wildcard test/test_lj.cu)
-TEST_OBJ = $(patsubst %.cu,%.o,$(TEST_SRC))
+HEADERS   = include/kernels.cuh include/crossover.cuh include/utils.hpp
+APP_SRCS  = $(wildcard src/*.cu) $(wildcard src/*.cpp)
+APP_OBJS  = $(patsubst %.cu,%.o,$(filter %.cu,$(APP_SRCS))) \
+            $(patsubst %.cpp,%.o,$(filter %.cpp,$(APP_SRCS)))
 
-TARGET = bin/ga $(if $(TEST_SRC),bin/test_lj)
+TARGET    = bin/ga
 
-.PHONY: all clean check-toolchain
+.PHONY: all clean
 
-all: check-toolchain $(TARGET)
+all: $(TARGET)
 
-bin/ga: $(APP_OBJS)
-	mkdir -p bin
+bin/ga: $(APP_OBJS) | bin
 	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(LDFLAGS)
 
-bin/test_lj: $(TEST_OBJ)
+bin:
 	mkdir -p bin
-	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(LDFLAGS)
 
 %.o: %.cpp $(HEADERS)
-	$(NVCC) $(NVCCFLAGS) -c $< -o $@
-
-$(TEST_OBJ): $(TEST_SRC) $(HEADERS)
 	$(NVCC) $(NVCCFLAGS) -c $< -o $@
 
 %.o: %.cu $(HEADERS)
 	$(NVCC) $(NVCCFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(APP_OBJS) $(TEST_OBJ) $(TARGET)
+	rm -f $(APP_OBJS) $(TARGET)

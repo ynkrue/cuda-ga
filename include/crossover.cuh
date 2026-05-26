@@ -1,6 +1,6 @@
 /**
- * @file geometry.cuh
- * @brief Definitions related to geometric calculations for genetic algorithm optimization.
+ * @file crossover.cuh
+ * @brief Crossover operators for the Lennard-Jones GA.
  *
  * @author Yannik Rüfenacht
  */
@@ -13,43 +13,6 @@
 #include <curand_kernel.h>
 
 namespace cuga {
-
-/**
- * @brief Performs blending crossover (BLX-alpha) between two parents to produce two children.
- * @param mating_pool The array containing the selected parents.
- * @param new_pop The array to store the new population after crossover.
- * @param idx The index of the thread.
- * @param states The array of random states for each thread.
- * @param config The configuration parameters for the genetic algorithm.
- */
-__device__ __inline__ void blending(const double* mating_pool, double* new_pop, int idx, curandState* states, Config config) {
-    // each thread produces two children
-    int child_a_idx = 2 * idx;
-    int child_b_idx = 2 * idx + 1;
-    if (child_b_idx >= config.population) return;
-
-    // select two parents randomly
-    int parent_a_idx = curand(&states[idx]) % config.parents;
-    int parent_b_idx = curand(&states[idx]) % config.parents;
-
-    bool do_crossover = curand_uniform_double(&states[idx]) < config.crossover_rate;
-
-    // loop over dimensions and perform blx alpha crossover
-    for (int j = 0; j < config.dimension; ++j) {
-        double gene_a = mating_pool[j * config.parents + parent_a_idx];
-        double gene_b = mating_pool[j * config.parents + parent_b_idx];
-        if (do_crossover) {
-            double low = fmin(gene_a, gene_b) - config.crossover_alpha * fabs(gene_a - gene_b);
-            double high = fmax(gene_a, gene_b) + config.crossover_alpha * fabs(gene_a - gene_b);
-            new_pop[j * config.population + child_a_idx] = low + (high - low) * curand_uniform_double(&states[idx]);
-            new_pop[j * config.population + child_b_idx] = low + (high - low) * curand_uniform_double(&states[idx]);
-        } else {
-            // no crossover, just copy parents
-            new_pop[j * config.population + child_a_idx] = gene_a;
-            new_pop[j * config.population + child_b_idx] = gene_b;
-        }
-    }
-}
 
 /**
  * @brief Computes the center of mass for a given set of atoms.
@@ -130,9 +93,7 @@ __device__ __inline__ void recenter_child(double* new_pop, int child_idx, int po
  * @param states The array of random states for each thread.
  * @param config The configuration parameters for the genetic algorithm.
  */
-__device__ __inline__ void cut_and_splice(const double* mating_pool, double* new_pop, int idx, curandState* states, Config config) {
-
-    
+__device__ __inline__ void cut_and_splice(const double* mating_pool, double* new_pop, int idx, curandState* states, Config config) {    
     // each thread produces two children
     int child_a_idx = 2 * idx;
     int child_b_idx = 2 * idx + 1;
