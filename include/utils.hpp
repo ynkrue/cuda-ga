@@ -7,6 +7,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 namespace cuga {
 
@@ -21,17 +22,15 @@ struct Config {
 
     // selection, crossover, mutation and elitism parameters
     int    parents         = -1;
-    int    tournament_k    = 5;
+    int    tournament_k    = 2;
     double crossover_rate  = 0.8;
     double mutation_rate   = 0.3;
 
     // parameter space parameters
-    double init_low       = -2.0;
-    double init_high      =  2.0;
-
-    int logging_interval  = 5;
-
+    double init_radius     = 10.0;
+    int   logging_interval = 5;
     void parse(std::string config_file);
+    void parse_cmd(int argc, char* argv[]);
     void print() const;
 };
 

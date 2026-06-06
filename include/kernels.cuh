@@ -58,6 +58,25 @@ namespace kernels {
     __global__ void mutation_kernel(double* pop, curandState* states, Config config);
 
     /**
+     * @brief CUDA kernel for the cataclysm operation.
+     * @param pop The population of candidate solutions to be subjected to cataclysm.
+     * @param states The device array to store the random states.
+     * @param config The configuration struct containing parameters for the cataclysm operation.
+     */
+    __global__ void cataclysm_kernel(double* pop, curandState* states, Config config);
+
+    /**
+     * @brief CUDA kernel for relaxing the positions of atoms.
+     * @param pop The population of candidate solutions.
+     * @param config The configuration struct containing parameters for relaxation.
+     * This function performs a simple relaxation step by using Gradient Descent to move
+     * the atoms in the direction of the negative gradient of the energy. This can help to
+     * improve the fitness of the solutions by finding local minima in the energy landscape
+     * before the next generation of the genetic algorithm is created.
+     */
+    __global__ void relaxation_kernel(double* pop, Config config, int start_idx);
+
+    /**
      * @brief CUDA kernel for the elitism operation.
      * @param pop The current population of candidate solutions.
      * @param new_pop The new population to which the elite individuals will be copied.

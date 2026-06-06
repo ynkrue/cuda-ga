@@ -85,11 +85,49 @@ void Config::parse(std::string config_file) {
 
     logging_interval = std::max(1, generations / 10);
     dimension = 3 * n_atoms;
-    double half_width = 0.7 * std::cbrt((double)n_atoms);
-    init_low  = -half_width;
-    init_high =  half_width;
+    init_radius = 0.7 * std::cbrt((double)n_atoms);
 
     file.close();
+}
+
+void Config::parse_cmd(int argc, char* argv[]) {
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--config" && i + 1 < argc) {
+            std::cerr << "Error: Either use a config file or command line arguments, not both!" << std::endl;
+            exit(1);
+        } else if (arg == "--help") {
+            std::cout << "Usage: " << argv[0] << " [--config <file>] [--n_atoms <int>] [--population <int>] [--generations <int>] [--parents <int>] [--tournament_k <int>] [--crossover_rate <float>] [--mutation_rate <float>] [--seed <int>]" << std::endl;
+            exit(0);
+        } else if (arg == "--n_atoms" && i + 1 < argc) {
+            n_atoms = std::stoi(argv[++i]);
+        } else if (arg == "--population" && i + 1 < argc) {
+            population = std::stoi(argv[++i]);
+        } else if (arg == "--generations" && i + 1 < argc) {
+            generations = std::stoi(argv[++i]);
+        } else if (arg == "--parents" && i + 1 < argc) {
+            parents = std::stoi(argv[++i]);
+        } else if (arg == "--tournament_k" && i + 1 < argc) {
+            tournament_k = std::stoi(argv[++i]);
+        } else if (arg == "--crossover_rate" && i + 1 < argc) {
+            crossover_rate = std::stod(argv[++i]);
+        } else if (arg == "--mutation_rate" && i + 1 < argc) {
+            mutation_rate = std::stod(argv[++i]);
+        } else if (arg == "--seed" && i + 1 < argc) {
+            seed = std::stoi(argv[++i]);
+        } else {
+            std::cerr << "Warning: Unrecognized command line argument '" << arg << "'" << std::endl;
+            exit(1);
+        }
+    }
+
+    if (parents < 0) {
+        parents = population;
+    }
+
+    logging_interval = std::max(1, generations / 10);
+    dimension = 3 * n_atoms;
+    init_radius = 0.7 * std::cbrt((double)n_atoms);
 }
 
 void Config::print() const {
@@ -110,8 +148,7 @@ void Config::print() const {
     std::cout << "  Crossover Rate   :: " << crossover_rate << std::endl;
     std::cout << "  Crossover Type   :: Cut and Splice" << std::endl;
     std::cout << "  Mutation Rate    :: " << mutation_rate << std::endl;
-    std::cout << "  Init Low         :: " << init_low << std::endl;
-    std::cout << "  Init High        :: " << init_high << std::endl;
+    std::cout << "  Init Radius      :: " << init_radius << std::endl;
 
     std::cout << "  Logging Interval :: " << logging_interval << " generations" << std::endl;
 
@@ -120,11 +157,11 @@ void Config::print() const {
 
 void log_header(const Config& config) {
     std::cout << std::string(80, '-') << std::endl;
-    std::cout << std::left << std::setw(17) << "Gen" << " | "
-              << std::right << std::setw(12) << "Best" << " | "
-              << std::setw(12) << "Worst" << " | "
-              << std::setw(12) << "Avg" << " | "
-              << std::setw(11) << "StdDev" << std::endl;
+    std::cout << std::left << std::setw(17) << "Gen" << "  |"
+              << std::right << std::setw(12) << "Best" << "  |"
+              << std::setw(12) << "Worst" << "  |"
+              << std::setw(12) << "Avg" << "  |"
+              << std::setw(12) << "StdDev" << std::endl;
     std::cout << std::string(80, '-') << std::endl;
 }
 
@@ -136,12 +173,12 @@ void log_stats(const Config& config, double* stats, int gen) {
     };
 
     if (gen % config.logging_interval == 0) {
-        std::cout << "\r[" << std::setw(11) << std::right << gen << "/" << config.generations << "]"
+        std::cout << "\r[" << std::setw(10) << std::right << gen << "/" << config.generations << "]"
                     << "  |" << format_stat(stats[0]) << "  |" << format_stat(stats[1])
                     << "  |" << format_stat(stats[2]) << "  |" << format_stat(stats[3])
                     << std::endl << std::flush;
     } else {
-        std::cout << "\r[" << std::setw(12) << std::right << gen << "/" << config.generations << "]" << std::flush;
+        std::cout << "\r[" << std::setw(10) << std::right << gen << "/" << config.generations << "]" << std::flush;
     }
 }
 
