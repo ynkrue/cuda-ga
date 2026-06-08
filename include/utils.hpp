@@ -1,6 +1,6 @@
 /**
  * @file utils.hpp
- * @brief Utility functions for the CUDA genetic algorithm.
+ * @brief Utility functions for the CUDA simulated annealing optimizer.
  *
  * @author Yannik Rüfenacht
  */
@@ -9,32 +9,33 @@
 #include <string>
 #include <vector>
 
-namespace cuga {
+namespace cusa {
 
 struct Config {
-    // general configuration
-    int    n_atoms        = 7;
-    int    dimension      = 21;
-    int    population     = 300;
-    int    generations    = 50;
+    // problem definition
+    int    n_atoms        = 13;
+    int    dimension      = 39;   // 3 * n_atoms
+
+    // parallel sa: one block drives one independent walker
+    int    n_walkers      = 1024; // number of parallel SA trajectories
+    int    iterations     = 1000; // basin-hopping steps per walker
 
     int    seed           = 42;
 
-    // selection, crossover, mutation and elitism parameters
-    int    parents         = -1;
-    int    tournament_k    = 2;
-    double crossover_rate  = 0.8;
-    double mutation_rate   = 0.3;
+    // simulated annealing schedule
+    double T_init         = 1.0;   // initial acceptance temperature
+    double cooling_rate   = 0.999; // geometric cooling
+    double step_size      = 0.5;   // perturbation displacement magnitude
 
-    // parameter space parameters
-    double init_radius     = 10.0;
-    int   logging_interval = 5;
+    // initialization
+    double init_radius     = 10.0; // derived from n_atoms
+    int   logging_interval = 100;
     void parse(std::string config_file);
     void parse_cmd(int argc, char* argv[]);
     void print() const;
 };
 
 void log_header(const Config& config);
-void log_stats(const Config& config, double* stats, int gen);
+void log_stats(const Config& config, double* stats, int step, double temperature);
 
-} // namespace cuga
+} // namespace cusa
