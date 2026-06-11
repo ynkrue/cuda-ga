@@ -1,19 +1,19 @@
 NVCC      ?= nvcc
-NVCCFLAGS  = -std=c++11 -Iinclude
+NVCCFLAGS  = -std=c++11 -Iinclude -arch=sm_80 -O3
 LDFLAGS    = -lm
 
-HEADERS   = include/kernels.cuh include/utils.cuh include/utils.hpp
+HEADERS   = include/kernels.cuh include/utils.hpp
 APP_SRCS  = $(wildcard src/*.cu) $(wildcard src/*.cpp)
 APP_OBJS  = $(patsubst %.cu,%.o,$(filter %.cu,$(APP_SRCS))) \
             $(patsubst %.cpp,%.o,$(filter %.cpp,$(APP_SRCS)))
 
-TARGET    = bin/ga
+TARGET    = bin/sa
 
 .PHONY: all clean
 
 all: $(TARGET)
 
-bin/ga: $(APP_OBJS) | bin
+bin/sa: $(APP_OBJS) | bin
 	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(LDFLAGS)
 
 bin:

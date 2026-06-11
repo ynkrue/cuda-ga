@@ -9,3 +9,9 @@
 *.o
 bin/
 build/
+
+# run outputs (keep the directories, not their contents)
+output/*
+logs/*
+!output/.gitkeep
+!logs/.gitkeep

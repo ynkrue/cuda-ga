@@ -1,8 +1,17 @@
 /**
  * @file kernels.cuh
- * @brief Definitions related to CUDA kernels for genetic algorithm optimization.
+ * @brief Definitions related to CUDA kernels for simulated annealing.
  *
  * @author Yannik Rüfenacht
+ *
+ * Parallelism model: one CUDA block drives one independent walker (an SA
+ * trajectory over a Lennard-Jones cluster). The threads of a block cooperate
+ * to evaluate the O(N^2) energy and forces of that walker's cluster, which is
+ * what makes large clusters (hundreds of atoms) tractable.
+ *
+ * Memory layout: each walker's coordinates are stored contiguously,
+ * coords[walker * dimension + (3*a + c)], so a block can stream its cluster
+ * into shared memory.
  */
 
 #pragma once
@@ -12,88 +21,87 @@
 #include <cuda_runtime.h>
 #include <curand_kernel.h>
 
-namespace cuga {
+namespace cusa {
+
+// Threads per block for the flat (thread-per-walker) kernels, where each thread
+// owns one walker: init, perturb, accept.
+constexpr int WALKER_THREADS = 256;
+
+// Threads per block for the cooperative (block-per-walker) kernels: energy and
+// relaxation. One block drives one walker and its threads cooperate over the
+// cluster's atoms, so we want roughly one thread per atom. Snapped to a power of
+// two (required by the block reductions) and clamped to [32, 256].
+inline int coop_threads(int n_atoms) {
+    int t = 32;
+    while (t < n_atoms && t < 256) t <<= 1;
+    return t;
+}
 
 namespace kernels {
     /**
-     * @brief CUDA kernel for initializing the population with random values.
-     * @param pop The device array to store the initialized population.
-     * @param states The device array to store the random states.
+     * @brief Initializes each walker's cluster with random atom positions.
+     * @param coords The device array of walker configurations.
+     * @param states The device array of per-walker random states.
      * @param config The configuration struct containing initialization parameters.
      */
-    __global__ void init_population(double* pop, curandState* states, Config config);
+    __global__ void init_walkers(double* coords, curandState* states, Config config);
 
     /**
-    * @brief CUDA kernel for evaluating the fitness of a population.
-    * @param pop The population of candidate solutions.
-    * @param fitness The array to store the computed fitness values.
-    * @param config The configuration struct containing parameters for fitness evaluation.
-    */
-    __global__ void fitness_kernel(const double* pop, double* fitness, Config config);
-
-    /**
-     * @brief CUDA kernel for the selection, crossover, and mutation operations.
-     * @param pop The current population of candidate solutions.
-     * @param new_pop The new population generated through selection, crossover, and mutation.
-     * @param fitness The array of fitness values for the current population.
-     * @param config The configuration struct containing parameters for the genetic operations.
+     * @brief Evaluates the Lennard-Jones energy of each walker's cluster.
+     * @param coords The device array of walker configurations.
+     * @param energy The array to store the computed energy per walker.
+     * @param config The configuration struct.
+     * Requires dynamic shared memory of (dimension) doubles.
      */
-    __global__ void selection_kernel(const double* pop, double* mating_pool, const double* fitness, curandState* states, Config config);
+    __global__ void energy_kernel(const double* coords, double* energy, Config config);
 
     /**
-     * @brief CUDA kernel for the crossover operation.
-     * @param mating_pool The pool of selected parents for crossover.
-     * @param new_pop The new population generated through crossover.
-     * @param states The device array to store the random states.
-     * @param config The configuration struct containing parameters for the crossover operation.
+     * @brief Local minimization of each walker's cluster via gradient descent on the
+     * Lennard-Jones potential. This is the local-relaxation step of basin hopping.
+     * @param coords The device array of walker configurations.
+     * @param config The configuration struct.
+     * Requires dynamic shared memory of (2 * dimension) doubles.
      */
-    __global__ void crossover_kernel(const double* mating_pool, double* new_pop, curandState* states, Config config);
+    __global__ void relaxation_kernel(double* coords, Config config);
 
     /**
-     * @brief CUDA kernel for the mutation operation.
-     * @param pop The population of candidate solutions to be mutated.
-     * @param states The device array to store the random states.
-     * @param config The configuration struct containing parameters for the mutation operation.
+     * @brief Proposes a trial configuration by randomly displacing the atoms of the
+     * current configuration (perturbation move).
+     * @param current The current accepted configurations.
+     * @param trial The output trial configurations.
+     * @param states The device array of per-walker random states.
+     * @param config The configuration struct.
      */
-    __global__ void mutation_kernel(double* pop, curandState* states, Config config);
+    __global__ void perturb_kernel(const double* current, double* trial, curandState* states, Config config);
 
     /**
-     * @brief CUDA kernel for the cataclysm operation.
-     * @param pop The population of candidate solutions to be subjected to cataclysm.
-     * @param states The device array to store the random states.
-     * @param config The configuration struct containing parameters for the cataclysm operation.
+     * @brief Metropolis acceptance step. Accepts or rejects each walker's trial
+     * configuration against its current configuration at the given temperature,
+     * and tracks the best configuration found so far per walker.
+     * @param current The current accepted configurations.
+     * @param trial The trial configurations.
+     * @param current_energy The current energies.
+     * @param trial_energy The trial energies.
+     * @param best The best configurations found so far per walker.
+     * @param best_energy The best energies found so far per walker.
+     * @param states The device array of per-walker random states.
+     * @param temperature The current annealing temperature.
+     * @param config The configuration struct.
      */
-    __global__ void cataclysm_kernel(double* pop, curandState* states, Config config);
+    __global__ void accept_kernel(double* current, const double* trial,
+                                  double* current_energy, const double* trial_energy,
+                                  double* best, double* best_energy,
+                                  curandState* states, double temperature, Config config);
 
     /**
-     * @brief CUDA kernel for relaxing the positions of atoms.
-     * @param pop The population of candidate solutions.
-     * @param config The configuration struct containing parameters for relaxation.
-     * This function performs a simple relaxation step by using Gradient Descent to move
-     * the atoms in the direction of the negative gradient of the energy. This can help to
-     * improve the fitness of the solutions by finding local minima in the energy landscape
-     * before the next generation of the genetic algorithm is created.
+     * @brief Computes aggregate statistics (best, worst, average) of the per-walker
+     * best energies, for logging. Launched as a single block.
+     * @param best_energy The array of best energies per walker.
+     * @param config The configuration struct.
+     * @param stats Output array of 3 doubles: best, worst, average.
      */
-    __global__ void relaxation_kernel(double* pop, Config config, int start_idx);
-
-    /**
-     * @brief CUDA kernel for the elitism operation.
-     * @param pop The current population of candidate solutions.
-     * @param new_pop The new population to which the elite individuals will be copied.
-     * @param fitness The array of fitness values for the current population.
-     * @param config The configuration struct containing parameters for elitism.
-     */
-    __global__ void elitism_kernel(const double* pop, double* new_pop, const double* fitness, Config config);
-
-    /**
-     * @brief CUDA kernel for population statistics.
-     * @param pop The current population of candidate solutions.
-     * @param fitness The array of fitness values for the current population.
-     * @param config The configuration struct containing parameters for statistics calculation.
-     * @param stats The struct to store the computed statistics.
-     */
-     __global__ void statistics_kernel(const double* pop, const double* fitness, Config config, double* stats);
+    __global__ void statistics_kernel(const double* best_energy, Config config, double* stats);
 
 } // namespace kernels
 
-} // namespace cuga
+} // namespace cusa
