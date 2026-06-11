@@ -23,10 +23,6 @@
 
 namespace cusa {
 
-// Threads per block for the flat (thread-per-walker) kernels, where each thread
-// owns one walker: init, perturb, accept.
-constexpr int WALKER_THREADS = 256;
-
 // Threads per block for the cooperative (block-per-walker) kernels: energy and
 // relaxation. One block drives one walker and its threads cooperate over the
 // cluster's atoms, so we want roughly one thread per atom. Snapped to a power of
@@ -35,6 +31,10 @@ inline int coop_threads(int n_atoms) {
     int t = 32;
     while (t < n_atoms && t < 256) t <<= 1;
     return t;
+}
+
+inline int ceil_div(int a, int b) {
+    return (a + b - 1) / b;
 }
 
 namespace kernels {
@@ -65,14 +65,17 @@ namespace kernels {
     __global__ void relaxation_kernel(double* coords, Config config);
 
     /**
-     * @brief Proposes a trial configuration by randomly displacing the atoms of the
-     * current configuration (perturbation move).
+     * @brief Proposes a trial configuration by randomly displacing every atom of the
+     * current configuration. The displacement magnitude is step_size * the walker's
+     * temperature, so hot replicas take larger moves.
      * @param current The current accepted configurations.
      * @param trial The output trial configurations.
      * @param states The device array of per-walker random states.
+     * @param temps The per-walker temperatures.
      * @param config The configuration struct.
      */
-    __global__ void perturb_kernel(const double* current, double* trial, curandState* states, Config config);
+    __global__ void perturb_kernel(const double* current, double* trial, curandState* states,
+                                   const double* temps, Config config);
 
     /**
      * @brief Metropolis acceptance step. Accepts or rejects each walker's trial
@@ -85,22 +88,31 @@ namespace kernels {
      * @param best The best configurations found so far per walker.
      * @param best_energy The best energies found so far per walker.
      * @param states The device array of per-walker random states.
-     * @param temperature The current annealing temperature.
+     * @param temps The per-walker temperatures.
      * @param config The configuration struct.
      */
     __global__ void accept_kernel(double* current, const double* trial,
                                   double* current_energy, const double* trial_energy,
                                   double* best, double* best_energy,
-                                  curandState* states, double temperature, Config config);
+                                  curandState* states, const double* temps, Config config);
 
     /**
-     * @brief Computes aggregate statistics (best, worst, average) of the per-walker
-     * best energies, for logging. Launched as a single block.
-     * @param best_energy The array of best energies per walker.
+     * @brief Replica-exchange sweep: one thread per ensemble attempts to swap the
+     * configurations of each adjacent pair of rungs, accepting with
+     * exp((1/T_lo - 1/T_hi)(E_lo - E_hi)).
+     * @param current The current configurations (swapped in place on acceptance).
+     * @param current_energy The current energies (swapped alongside).
+     * @param best The best configurations found so far per walker.
+     * @param best_energy The best energies found so far per walker.
+     * @param states The device array of per-walker random states.
+     * @param temps The per-walker temperatures.
+     * @param swap_accepts Device counter incremented once per accepted swap.
      * @param config The configuration struct.
-     * @param stats Output array of 3 doubles: best, worst, average.
      */
-    __global__ void statistics_kernel(const double* best_energy, Config config, double* stats);
+    __global__ void swap_kernel(double* current, double* current_energy,
+                                double* best, double* best_energy,
+                                curandState* states, const double* temps,
+                                unsigned long long* swap_accepts, Config config);
 
 } // namespace kernels
 

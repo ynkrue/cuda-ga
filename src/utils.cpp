@@ -14,10 +14,12 @@
 #include <cctype>
 #include <algorithm>
 #include <cmath>
+#include <map>
+#include <vector>
 
 namespace cusa {
 
-// Helper: trim whitespace from both ends
+/// Helper to trim whitespace from both ends
 static std::string trim(const std::string& str) {
     auto start = str.begin();
     while (start != str.end() && std::isspace(*start)) {
@@ -64,10 +66,12 @@ void Config::parse(std::string config_file) {
             n_walkers = std::stoi(val);
         } else if (key == "iterations") {
             iterations = std::stoi(val);
-        } else if (key == "T_init") {
-            T_init = std::stod(val);
-        } else if (key == "cooling_rate") {
-            cooling_rate = std::stod(val);
+        } else if (key == "n_temps") {
+            n_temps = std::stoi(val);
+        } else if (key == "T_min") {
+            T_min = std::stod(val);
+        } else if (key == "T_max") {
+            T_max = std::stod(val);
         } else if (key == "step_size") {
             step_size = std::stod(val);
         } else if (key == "seed") {
@@ -77,11 +81,8 @@ void Config::parse(std::string config_file) {
         }
     }
 
-    logging_interval = std::max(1, iterations / 10);
-    dimension = 3 * n_atoms;
-    init_radius = 0.7 * std::cbrt((double)n_atoms);
-
     file.close();
+    finalize();
 }
 
 void Config::parse_cmd(int argc, char* argv[]) {
@@ -91,7 +92,7 @@ void Config::parse_cmd(int argc, char* argv[]) {
             std::cerr << "Error: Either use a config file or command line arguments, not both!" << std::endl;
             exit(1);
         } else if (arg == "--help") {
-            std::cout << "Usage: " << argv[0] << " [--config <file>] [--n_atoms <int>] [--n_walkers <int>] [--iterations <int>] [--T_init <float>] [--cooling_rate <float>] [--step_size <float>] [--seed <int>]" << std::endl;
+            std::cout << "Usage: " << argv[0] << " [--config <file>] [--n_atoms <int>] [--n_walkers <int>] [--iterations <int>] [--n_temps <int>] [--T_min <float>] [--T_max <float>] [--step_size <float>] [--seed <int>]" << std::endl;
             exit(0);
         } else if (arg == "--n_atoms" && i + 1 < argc) {
             n_atoms = std::stoi(argv[++i]);
@@ -99,10 +100,12 @@ void Config::parse_cmd(int argc, char* argv[]) {
             n_walkers = std::stoi(argv[++i]);
         } else if (arg == "--iterations" && i + 1 < argc) {
             iterations = std::stoi(argv[++i]);
-        } else if (arg == "--T_init" && i + 1 < argc) {
-            T_init = std::stod(argv[++i]);
-        } else if (arg == "--cooling_rate" && i + 1 < argc) {
-            cooling_rate = std::stod(argv[++i]);
+        } else if (arg == "--n_temps" && i + 1 < argc) {
+            n_temps = std::stoi(argv[++i]);
+        } else if (arg == "--T_min" && i + 1 < argc) {
+            T_min = std::stod(argv[++i]);
+        } else if (arg == "--T_max" && i + 1 < argc) {
+            T_max = std::stod(argv[++i]);
         } else if (arg == "--step_size" && i + 1 < argc) {
             step_size = std::stod(argv[++i]);
         } else if (arg == "--seed" && i + 1 < argc) {
@@ -113,9 +116,37 @@ void Config::parse_cmd(int argc, char* argv[]) {
         }
     }
 
-    logging_interval = std::max(1, iterations / 10);
-    dimension = 3 * n_atoms;
-    init_radius = 0.7 * std::cbrt((double)n_atoms);
+    finalize();
+}
+
+void Config::finalize() {
+    if (n_temps < 1) n_temps = 1;
+    // Each ensemble needs a full ladder, round walkers down if necessary.
+    n_ensembles = std::max(1, n_walkers / n_temps);
+    n_walkers   = n_ensembles * n_temps;
+
+    dimension        = 3 * n_atoms;
+    init_radius      = 0.7 * std::cbrt((double)n_atoms);
+    logging_interval = std::max(1, iterations / logging_interval);
+}
+
+double known_lj_minimum(int n_atoms) {
+    // Putative global minima, loaded once from reference/lj_minima.data.
+    static const std::map<int, double> table = [] {
+        std::map<int, double> t;
+        std::ifstream file("reference/lj_minima.data");
+        std::string line;
+        while (std::getline(file, line)) {
+            if (line.empty() || line[0] == '#') continue;
+            std::istringstream ss(line);
+            int n; double e;
+            if (ss >> n >> e) t[n] = e;
+        }
+        return t;
+    }();
+
+    auto it = table.find(n_atoms);
+    return it != table.end() ? it->second : std::nan("");
 }
 
 void Config::print() const {
@@ -125,14 +156,14 @@ void Config::print() const {
     std::cout << "Configuration:" << std::endl;
     std::cout << "  N Atoms          :: " << n_atoms << std::endl;
     std::cout << "  Dimension        :: " << dimension << std::endl;
-    std::cout << "  Walkers          :: " << n_walkers << std::endl;
+    std::cout << "  Walkers          :: " << n_walkers
+              << " (" << n_ensembles << " ensembles x " << n_temps << " temps)" << std::endl;
     std::cout << "  Iterations       :: " << iterations << std::endl;
 
     std::cout << "  Seed             :: " << seed << std::endl;
 
-    std::cout << "  Initial Temp     :: " << T_init << std::endl;
-    std::cout << "  Cooling Rate     :: " << cooling_rate << std::endl;
-    std::cout << "  Step Size        :: " << step_size << std::endl;
+    std::cout << "  Temp Ladder      :: [" << T_min << ", " << T_max << "]" << std::endl;
+    std::cout << "  Step Size        :: " << step_size << " (per replica: step_size * T)" << std::endl;
     std::cout << "  Init Radius      :: " << init_radius << std::endl;
 
     std::cout << "  Logging Interval :: " << logging_interval << " iterations" << std::endl;
@@ -140,31 +171,35 @@ void Config::print() const {
     std::cout << std::string(80, '=') << std::endl << std::endl;
 }
 
+PopStats population_stats(const double* energy, int n, double tol) {
+    std::vector<double> e(energy, energy + n);
+    std::sort(e.begin(), e.end());
+
+    PopStats ps{e.front(), 1, 0};
+    for (int i = 0; i < n; ++i) {
+        if (i > 0 && e[i] - e[i - 1] > tol) ++ps.basins;     // new distinct level
+        if (e[i] - ps.best <= tol) ++ps.best_occ;            // still the lowest basin
+    }
+    return ps;
+}
+
 void log_header(const Config& config) {
     std::cout << std::string(80, '-') << std::endl;
-    std::cout << std::left << std::setw(17) << "Step" << "  |"
-              << std::right << std::setw(14) << "Best" << "  |"
-              << std::setw(14) << "Worst" << "  |"
-              << std::setw(14) << "Avg" << "  |"
-              << std::setw(14) << "Temp" << std::endl;
+    std::cout << std::setw(20) << "Step   |"
+              << std::setw(22) << "Best"
+              << std::setw(12) << "Basins"
+              << std::setw(12) << "InBest"
+              << std::setw(12) << "Swap%" << std::endl;
     std::cout << std::string(80, '-') << std::endl;
 }
 
-void log_stats(const Config& config, double* stats, int step, double temperature) {
-    auto format_stat = [](double value) {
-        std::ostringstream oss;
-        oss << std::setw(14) << std::right << std::fixed << std::setprecision(6) << value;
-        return oss.str();
-    };
-
-    if (step % config.logging_interval == 0) {
-        std::cout << "\r[" << std::setw(10) << std::right << step << "/" << config.iterations << "]"
-                    << "  |" << format_stat(stats[0]) << "  |" << format_stat(stats[1])
-                    << "  |" << format_stat(stats[2]) << "  |" << format_stat(temperature)
-                    << std::endl << std::flush;
-    } else {
-        std::cout << "\r[" << std::setw(10) << std::right << step << "/" << config.iterations << "]" << std::flush;
-    }
+void log_stats(const Config& config, int step, const PopStats& ps, double swap_rate) {
+    std::string step_str = "[" + std::to_string(step) + "/" + std::to_string(config.iterations) + "]   |";
+    std::cout << std::setw(20) << step_str
+              << std::setw(22) << std::setprecision(10) << ps.best
+              << std::setw(12) << ps.basins
+              << std::setw(12) << ps.best_occ
+              << std::setw(12) << int(100.0 * swap_rate) << std::endl;
 }
 
 } // namespace cusa

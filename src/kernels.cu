@@ -24,8 +24,8 @@ namespace cusa::kernels {
 constexpr double R2_FLOOR = 0.5;
 
 // FIRE local-minimization parameters (Bitzek et al. 2006).
-constexpr int    FIRE_MAX_STEPS   = 500;
-constexpr double FIRE_FTOL        = 1e-3;
+constexpr int    FIRE_MAX_STEPS   = 1000;
+constexpr double FIRE_FTOL        = 1e-4;
 constexpr double FIRE_DT_START    = 0.05;
 constexpr double FIRE_DT_MAX      = 0.20;
 constexpr double FIRE_MAX_MOVE    = 0.15;
@@ -291,19 +291,22 @@ __global__ void relaxation_kernel(double* coords, Config config) {
 
 
 /// Perturbation ============================================== ///
-__global__ void perturb_kernel(const double* current, double* trial, curandState* states, Config config) {
+__global__ void perturb_kernel(const double* current, double* trial, curandState* states,
+                               const double* temps, Config config) {
     int w = blockIdx.x * blockDim.x + threadIdx.x;
     if (w >= config.n_walkers) return;
 
     const double* cur = current + (size_t)w * config.dimension;
     double* tr = trial + (size_t)w * config.dimension;
 
-    // Displace every atom by a uniform random vector in [-step, step]^3.
+    // Displace every atom by a uniform random vector in [-step, step]^3, with the
+    // step scaled by temperature so hot replicas explore more aggressively.
+    double step = config.step_size * temps[w];
     curandState state = states[w];
     for (int a = 0; a < config.n_atoms; ++a) {
-        tr[3*a + 0] = cur[3*a + 0] + config.step_size * (2.0 * curand_uniform_double(&state) - 1.0);
-        tr[3*a + 1] = cur[3*a + 1] + config.step_size * (2.0 * curand_uniform_double(&state) - 1.0);
-        tr[3*a + 2] = cur[3*a + 2] + config.step_size * (2.0 * curand_uniform_double(&state) - 1.0);
+        tr[3*a + 0] = cur[3*a + 0] + step * (2.0 * curand_uniform_double(&state) - 1.0);
+        tr[3*a + 1] = cur[3*a + 1] + step * (2.0 * curand_uniform_double(&state) - 1.0);
+        tr[3*a + 2] = cur[3*a + 2] + step * (2.0 * curand_uniform_double(&state) - 1.0);
     }
     states[w] = state;
 }
@@ -313,7 +316,7 @@ __global__ void perturb_kernel(const double* current, double* trial, curandState
 __global__ void accept_kernel(double* current, const double* trial,
                               double* current_energy, const double* trial_energy,
                               double* best, double* best_energy,
-                              curandState* states, double temperature, Config config) {
+                              curandState* states, const double* temps, Config config) {
     int w = blockIdx.x * blockDim.x + threadIdx.x;
     if (w >= config.n_walkers) return;
 
@@ -321,7 +324,7 @@ __global__ void accept_kernel(double* current, const double* trial,
     double dE = te - current_energy[w];
 
     curandState state = states[w];
-    bool accept = (dE <= 0.0) || (curand_uniform_double(&state) < exp(-dE / temperature));
+    bool accept = (dE <= 0.0) || (curand_uniform_double(&state) < exp(-dE / temps[w]));
     states[w] = state;
 
     // On acceptance, the trial becomes the current configuration.
@@ -346,45 +349,57 @@ __global__ void accept_kernel(double* current, const double* trial,
 }
 
 
-/// Statistics ===================================================================== ///
-__global__ void statistics_kernel(const double* best_energy, Config config, double* stats) {
-    double sum = 0.0;
-    double best = 1e9;
-    double worst = -1e9;
+/// Replica exchange =============================================================== ///
+__global__ void swap_kernel(double* current, double* current_energy,
+                            double* best, double* best_energy,
+                            curandState* states, const double* temps,
+                            unsigned long long* swap_accepts, Config config) {
+    int e = blockIdx.x * blockDim.x + threadIdx.x;
+    if (e >= config.n_ensembles) return;
 
-    for (int i = threadIdx.x; i < config.n_walkers; i += blockDim.x) {
-        double e = best_energy[i];
-        sum += e;
-        if (e < best)  best = e;
-        if (e > worst) worst = e;
-    }
+    int base = e * config.n_temps;       // index of this ensemble's coldest rung
+    int D = config.dimension;
+    curandState state = states[base];
 
-    __shared__ double shared_sum[1024];
-    __shared__ double shared_best[1024];
-    __shared__ double shared_worst[1024];
-    shared_sum[threadIdx.x] = sum;
-    shared_best[threadIdx.x] = best;
-    shared_worst[threadIdx.x] = worst;
-    __syncthreads();
+    // Walk up the ladder, attempting to swap each adjacent (cold, hot) pair.
+    for (int r = 0; r < config.n_temps - 1; ++r) {
+        int lo = base + r;       // colder rung (lower T, higher beta)
+        int hi = base + r + 1;   // hotter rung
 
-    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.x < stride) {
-            shared_sum[threadIdx.x] += shared_sum[threadIdx.x + stride];
-            if (shared_best[threadIdx.x + stride] < shared_best[threadIdx.x]) {
-                shared_best[threadIdx.x] = shared_best[threadIdx.x + stride];
+        double E_lo = current_energy[lo];
+        double E_hi = current_energy[hi];
+        double arg = (1.0 / temps[lo] - 1.0 / temps[hi]) * (E_lo - E_hi);
+
+        if (arg >= 0.0 || curand_uniform_double(&state) < exp(arg)) {
+            // Swap configurations between the two rungs.
+            double* c_lo = current + (size_t)lo * D;
+            double* c_hi = current + (size_t)hi * D;
+            for (int i = 0; i < D; ++i) {
+                double tmp = c_lo[i];
+                c_lo[i] = c_hi[i];
+                c_hi[i] = tmp;
             }
-            if (shared_worst[threadIdx.x + stride] > shared_worst[threadIdx.x]) {
-                shared_worst[threadIdx.x] = shared_worst[threadIdx.x + stride];
+            current_energy[lo] = E_hi;
+            current_energy[hi] = E_lo;
+
+            // A structure swapped in may be the best either rung has held.
+            if (E_hi < best_energy[lo]) {
+                double* b = best + (size_t)lo * D;
+                for (int i = 0; i < D; ++i) b[i] = c_lo[i];
+                best_energy[lo] = E_hi;
             }
+            if (E_lo < best_energy[hi]) {
+                double* b = best + (size_t)hi * D;
+                for (int i = 0; i < D; ++i) b[i] = c_hi[i];
+                best_energy[hi] = E_lo;
+            }
+
+            atomicAdd(swap_accepts, 1ULL);
         }
-        __syncthreads();
     }
 
-    if (threadIdx.x == 0) {
-        stats[0] = shared_best[0];
-        stats[1] = shared_worst[0];
-        stats[2] = shared_sum[0] / config.n_walkers;
-    }
+    states[base] = state;
 }
+
 
 } // namespace cusa::kernels
