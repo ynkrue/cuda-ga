@@ -12,112 +12,63 @@
 namespace cusa {
 
 /**
- * @class Config
- * @brief Configuration parameters for the simulated annealing optimizer.
- * Fields:
- *  - n_atoms: Number of atoms in the cluster.
- *  - dimension: Dimensionality of the problem (3 * n_atoms).
- *  - n_walkers: Total number of walkers (replicas) in the population.
- *  - iterations: Total number of iterations to run the optimization.
- *  - n_temps: Number of temperatures in the replica exchange ladder.
- *  - T_min: Minimum temperature in the ladder.
- *  - T_max: Maximum temperature in the ladder.
- *  - step_size: Base step size for perturbations (scaled by temperature).
- *  - seed: Random seed for reproducibility.
- *  - n_ensembles: Number of ensembles (n_walkers / n_temps).
- *  - init_radius: Initial radius for random walker initialization.
- *  - logging_interval: Number of stats logged (log every iterations / logging_interval).
- * Methods:
- *  - parse(config_file): Parse configuration from a file.
- *  - parse_cmd(argc, argv): Parse command-line arguments.
- *  - finalize(): Finalize the configuration.
- *  - print(): Print the configuration.
+ * @brief Simulated-annealing / basin-hopping search parameters.
+ *
+ * n_temps, T_min, T_max, step_size, fire_max_steps default to AUTO and are
+ * resolved in finalize(): T_min/T_max/step_size to fixed constants, n_temps
+ * from n_walkers, fire_max_steps from n_atoms. Override any of them via
+ * config file or CLI.
  */
 struct Config {
-    // problem definition
+    static constexpr double AUTO = -1.0;
+
     int    n_atoms        = 13;
-    int    dimension      = 39;
+    int    dimension      = 39;      // 3 * n_atoms
 
     int    n_walkers      = 1024;
     int    iterations     = 250;
-    int    n_temps        = 16;
-    double T_min          = 0.5;
-    double T_max          = 1.5;
-    double step_size      = 0.5;
+    int    n_temps        = (int)AUTO;
+    double T_min          = AUTO;
+    double T_max          = AUTO;
+    double step_size      = AUTO;
+    int    fire_max_steps = (int)AUTO;
 
     int    seed           = 42;
 
-    int    n_ensembles     = 64;
+    int    n_ensembles     = 64;     // n_walkers / n_temps
     double init_radius     = 10.0;
     int   logging_interval = 25;
 
-    /**
-     * @brief Parse configuration from a file.
-     * @param config_file Path to the configuration file.
-     * @result Populates the Config object with values from
-     *   the config file, kepping defaults for missing keys.
-     */
+    /// Parse config file; missing keys keep their default.
     void parse(std::string config_file);
 
-    /**
-     * @brief Parse command-line arguments.
-     * @param argc Number of command-line arguments.
-     * @param argv Array of command-line arguments.
-     * @result Populates the Config object with values from
-     *  the command line, overriding any config values.
-     */
+    /// Parse CLI args; overrides config file values.
     void parse_cmd(int argc, char* argv[]);
 
-    /// Finalize config by computing derived parameters.
+    /// Resolve AUTO fields and derived fields (dimension, n_ensembles, ...).
     void finalize();
 
-    /// Print the configuration to the console.
+    /// Print the configuration.
     void print() const;
 };
 
-/**
- * @brief Get the known minimum LJ energy for a given number of atoms.
- * @param n_atoms The number of atoms.
- * @result The known minimum LJ energy in reduced units obtained
- *   from the Cambridge Cluster Database, or NaN if not tabulated.
- *   Used for confirmation of results at the end of the search.
- */
+/// Putative global-minimum LJ energy for n_atoms (Cambridge Cluster Database), or NaN if untabulated.
 double known_lj_minimum(int n_atoms);
 
-/**
- * @class PopStats
- * @brief Statistics about the population of walkers at a given step.
- * Fields:
- *  - best: lowest energy in the population
- *  - basins: number of distinct energy levels occupied (within tol)
- *  - best_occ: number of walkers sitting in the lowest basin (within tol)
- */
+/// Population statistics at a step, within an energy tolerance.
 struct PopStats {
-    double best;
-    int    basins;
-    int    best_occ;
+    double best;      ///< lowest energy in the population
+    int    basins;    ///< distinct energy levels occupied
+    int    best_occ;  ///< walkers in the lowest basin
 };
 
-/**
- * @brief Compute population statistics for a given energy array.
- * @param energy Array of energies for the population.
- * @param n Number of walkers.
- * @param tol Energy tolerance for distinguishing basins.
- * @result A PopStats struct containing the best energy, number of basins,
- *   and occupancy of the best basin. Used for logging the search progress.
- */
+/// Computes PopStats for a population's energies, within tol.
 PopStats population_stats(const double* energy, int n, double tol);
 
-/// Print the header for the log output.
+/// Prints the log table header.
 void log_header(const Config& config);
 
-/**
- * @brief Log the statistics for a given step of the simulation.
- * @param config The configuration object.
- * @param step The current iteration step.
- * @param ps The population statistics to log.
- * @param swap_rate The acceptance rate of replica exchanges in this interval.
- */
+/// Logs one row: step, best energy, basin count, best-basin occupancy, swap rate.
 void log_stats(const Config& config, int step, const PopStats& ps, double swap_rate);
 
 } // namespace cusa

@@ -74,6 +74,8 @@ void Config::parse(std::string config_file) {
             T_max = std::stod(val);
         } else if (key == "step_size") {
             step_size = std::stod(val);
+        } else if (key == "fire_max_steps") {
+            fire_max_steps = std::stoi(val);
         } else if (key == "seed") {
             seed = std::stoi(val);
         } else {
@@ -92,7 +94,8 @@ void Config::parse_cmd(int argc, char* argv[]) {
             std::cerr << "Error: Either use a config file or command line arguments, not both!" << std::endl;
             exit(1);
         } else if (arg == "--help") {
-            std::cout << "Usage: " << argv[0] << " [--config <file>] [--n_atoms <int>] [--n_walkers <int>] [--iterations <int>] [--n_temps <int>] [--T_min <float>] [--T_max <float>] [--step_size <float>] [--seed <int>]" << std::endl;
+            std::cout << "Usage: " << argv[0] << " [--config <file>] [--n_atoms <int>] [--n_walkers <int>] [--iterations <int>] [--n_temps <int>] [--T_min <float>] [--T_max <float>] [--step_size <float>] [--fire_max_steps <int>] [--seed <int>]" << std::endl;
+            std::cout << "  n_temps, T_min, T_max, step_size and fire_max_steps auto-derive from n_atoms if omitted." << std::endl;
             exit(0);
         } else if (arg == "--n_atoms" && i + 1 < argc) {
             n_atoms = std::stoi(argv[++i]);
@@ -108,6 +111,8 @@ void Config::parse_cmd(int argc, char* argv[]) {
             T_max = std::stod(argv[++i]);
         } else if (arg == "--step_size" && i + 1 < argc) {
             step_size = std::stod(argv[++i]);
+        } else if (arg == "--fire_max_steps" && i + 1 < argc) {
+            fire_max_steps = std::stoi(argv[++i]);
         } else if (arg == "--seed" && i + 1 < argc) {
             seed = std::stoi(argv[++i]);
         } else {
@@ -120,8 +125,20 @@ void Config::parse_cmd(int argc, char* argv[]) {
 }
 
 void Config::finalize() {
-    if (n_temps < 1) n_temps = 1;
-    // Each ensemble needs a full ladder, round walkers down if necessary.
+    // n_temps: log2(n_walkers), clamped [8,32] -- grows ensembles, not ladder length.
+    if (n_temps < 1) {
+        int derived = (int)std::lround(std::log2((double)std::max(2, n_walkers)));
+        n_temps = std::max(8, std::min(32, derived));
+    }
+    if (T_min == AUTO)      T_min      = 0.5;
+    if (T_max == AUTO)      T_max      = 1.5;
+    if (step_size == AUTO)  step_size  = 0.5;
+
+    if (fire_max_steps == (int)AUTO) {
+        fire_max_steps = std::max(1000, 20 * n_atoms);
+    }
+
+    // Round n_walkers down to a whole number of ensembles.
     n_ensembles = std::max(1, n_walkers / n_temps);
     n_walkers   = n_ensembles * n_temps;
 
@@ -164,6 +181,7 @@ void Config::print() const {
 
     std::cout << "  Temp Ladder      :: [" << T_min << ", " << T_max << "]" << std::endl;
     std::cout << "  Step Size        :: " << step_size << " (per replica: step_size * T)" << std::endl;
+    std::cout << "  FIRE Max Steps   :: " << fire_max_steps << std::endl;
     std::cout << "  Init Radius      :: " << init_radius << std::endl;
 
     std::cout << "  Logging Interval :: " << logging_interval << " iterations" << std::endl;

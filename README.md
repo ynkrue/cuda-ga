@@ -47,23 +47,28 @@ The run logs `Best`, `Basins` (distinct energy levels in the population), `InBes
 ```sh
 make                       # needs nvcc; built for sm_80 (A100)
 ./bin/sa --config configs/lj.ini
-./bin/sa --n_atoms 38 --n_walkers 2048 --iterations 5000 --n_temps 16 \
-         --T_min 0.5 --T_max 1.5 --step_size 0.5 --seed 42
+./bin/sa --n_atoms 38 --n_walkers 2048 --iterations 5000 --seed 42
 ```
 
-`scripts/run-lj.sh` sweeps a range of cluster sizes under SLURM.
+`n_temps`, `T_min`, `T_max`, `step_size` and `fire_max_steps` auto-derive in
+`Config::finalize()` (see `include/utils.hpp`) — the only knobs you normally need
+are `n_atoms`, `n_walkers`, `iterations` and `seed`. Pass any of the derived ones
+explicitly (config file or CLI) to override.
+
+`sweep/sweep_baseline.sh` sweeps N=2..150 under SLURM.
 
 ## Validation
 
 The best energy is compared at the end against the putative global minima in
-`reference/lj_minima.txt` (N = 2 to 150, from the
+`reference/lj_minima.data` (N = 2 to 150, from the
 [Cambridge Cluster Database](https://doye.chem.ox.ac.uk/jon/structures/LJ/tables.150.html)).
 The search itself never sees these values.
 
 ## Possible improvements
 
-- **Smarter moves:** angular/surface moves or moving only high-energy atoms cross
-  funnels better than uniform displacement (hard cases LJ38, 75-77, 98).
+- **Smarter moves:** angular/surface moves or moving only high-energy atoms may
+  cross funnels better than uniform displacement, for the double-funnel cases
+  (LJ75-77, 98) that stay hard even with correctly-tuned search parameters.
 - **Local minimizer:** L-BFGS reaches a minimum in fewer force evaluations than FIRE.
 - **Scaling to large N:** replace the O(N²) all-pairs energy with cutoff and
   cell/neighbor lists.

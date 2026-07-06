@@ -1,6 +1,6 @@
 /**
  * @file main.cu
- * @brief Main entry point for the CUDA simulated annealing
+ * @brief Main entry point for the CUDA parallel-tempering basin-hopping optimizer.
  *
  * @author Yannik Rüfenacht
  */
@@ -20,7 +20,6 @@
 using namespace cusa;
 
 int main(int argc, char** argv) {
-    // Parse configuration
     Config config;
     if (argc > 2 && std::string(argv[1]) == "--config") {
         config.parse(argv[2]);
@@ -31,16 +30,15 @@ int main(int argc, char** argv) {
 
     /// CUDA launch parameters
     // Cooperative kernels (energy, relaxation)
-    int coopBlocks  = config.n_walkers;             // one block per walker
-    int coopThreads = coop_threads(config.n_atoms); // threads per block scale with the number of atoms
+    int coopBlocks  = config.n_walkers;
+    int coopThreads = coop_threads(config.n_atoms);
     size_t energy_shmem = (size_t)(config.dimension + coopThreads) * sizeof(double);
     size_t relax_shmem  = (size_t)(3 * config.dimension + 4 * coopThreads) * sizeof(double);
     // Flat kernels (init, perturb, accept)
-    int flatThreads = 256;                                          // one thread per walker
-    int flatBlocks  = ceil_div(config.n_walkers, flatThreads);      // enough blocks to cover walkers
-    int swapBlocks  = ceil_div(config.n_ensembles, flatThreads);    // enough blocks to cover ensembles
+    int flatThreads = 256;
+    int flatBlocks  = ceil_div(config.n_walkers, flatThreads);
+    int swapBlocks  = ceil_div(config.n_ensembles, flatThreads);
 
-    // Energy gap for which two walkers count as the same basin.
     constexpr double BASIN_TOL = 1e-2;
 
 
@@ -48,13 +46,6 @@ int main(int argc, char** argv) {
     std::cout << "Initializing walkers..." << std::endl;
     const auto init_start = std::chrono::steady_clock::now();
 
-    /// Per-walker configurations are stored contiguously [walker * dimension + coord].
-
-    // host arrays
-    double* h_best = new double[(size_t)config.n_walkers * config.dimension];
-    double* h_best_energy = new double[config.n_walkers];
-
-    // device arrays
     double *d_current, *d_trial, *d_best;
     double *d_current_energy, *d_trial_energy, *d_best_energy, *d_temps;
     unsigned long long* d_swap_accepts;
@@ -69,10 +60,10 @@ int main(int argc, char** argv) {
     cudaMalloc(&d_temps, config.n_walkers * sizeof(double));
     cudaMalloc(&d_swap_accepts, sizeof(unsigned long long));
     cudaMalloc(&d_states, config.n_walkers * sizeof(curandState));
-    std::cout << "  " << "Allocated device memory for optmization." << std::endl;
+    std::cout << "  Allocated device memory." << std::endl;
 
-    // Per-walker temperature ladder: every ensemble holds the same geometric
-    // ladder from T_min (rung 0) to T_max (top rung).
+    double* h_best_energy = new double[config.n_walkers];
+
     double* h_temps = new double[config.n_walkers];
     for (int e = 0; e < config.n_ensembles; ++e) {
         for (int r = 0; r < config.n_temps; ++r) {
@@ -82,19 +73,17 @@ int main(int argc, char** argv) {
     }
     cudaMemcpy(d_temps, h_temps, config.n_walkers * sizeof(double), cudaMemcpyHostToDevice);
 
-    // Initialize the starting configurations.
     kernels::init_walkers<<<flatBlocks, flatThreads>>>(d_current, d_states, config);
     kernels::relaxation_kernel<<<coopBlocks, coopThreads, relax_shmem>>>(d_current, config);
     kernels::energy_kernel<<<coopBlocks, coopThreads, energy_shmem>>>(d_current, d_current_energy, config);
 
-    // The starting configuration is the best so far
     cudaMemcpy(d_best, d_current, coords_bytes, cudaMemcpyDeviceToDevice);
     cudaMemcpy(d_best_energy, d_current_energy, config.n_walkers * sizeof(double), cudaMemcpyDeviceToDevice);
 
     const auto init_end = std::chrono::steady_clock::now();
     const auto init_ms = std::chrono::duration_cast<std::chrono::milliseconds>(init_end - init_start).count();
-    std::cout << "  " << "Initialized " << config.n_walkers << " walkers of " << config.n_atoms << " atoms." << std::endl;
-    std::cout << "Initialization finished in " << init_ms << " ms" << std::endl << std::endl;
+    std::cout << "  " << config.n_walkers << " walkers (" << config.n_atoms << " atoms). Init: " << init_ms << " ms" << std::endl;
+    cudaMemset(d_swap_accepts, 0, sizeof(unsigned long long));
 
     /// ========== Optimization loop ========================================================= ///
     std::cout << "Starting optimization..." << std::endl;
@@ -102,11 +91,8 @@ int main(int argc, char** argv) {
     cudaMemcpy(h_best_energy, d_best_energy, config.n_walkers * sizeof(double), cudaMemcpyDeviceToHost);
     log_stats(config, 0, population_stats(h_best_energy, config.n_walkers, BASIN_TOL), 0.0);
 
-    cudaMemset(d_swap_accepts, 0, sizeof(unsigned long long));
     const auto optimization_start = std::chrono::steady_clock::now();
     for (int step = 1; step < config.iterations + 1; ++step) {
-
-        // One basin-hopping move per replica at its own temperature.
         kernels::perturb_kernel<<<flatBlocks, flatThreads>>>(d_current, d_trial, d_states, d_temps, config);
         kernels::relaxation_kernel<<<coopBlocks, coopThreads, relax_shmem>>>(d_trial, config);
         kernels::energy_kernel<<<coopBlocks, coopThreads, energy_shmem>>>(d_trial, d_trial_energy, config);
@@ -114,12 +100,10 @@ int main(int argc, char** argv) {
             d_current, d_trial, d_current_energy, d_trial_energy,
             d_best, d_best_energy, d_states, d_temps, config);
 
-        // Replica exchange between adjacent rungs.
         kernels::swap_kernel<<<swapBlocks, flatThreads>>>(
             d_current, d_current_energy, d_best, d_best_energy,
             d_states, d_temps, d_swap_accepts, config);
 
-        // Log a line every interval
         if (step % config.logging_interval == 0) {
             cudaMemcpy(h_best_energy, d_best_energy, config.n_walkers * sizeof(double), cudaMemcpyDeviceToHost);
 
@@ -137,13 +121,12 @@ int main(int argc, char** argv) {
     const auto optimization_end = std::chrono::steady_clock::now();
     const auto optimization_ms = std::chrono::duration_cast<std::chrono::milliseconds>(optimization_end - optimization_start).count();
     std::cout << std::string(80, '-') << std::endl;
-    std::cout << "Optimization loop finished in " << optimization_ms << " ms" << std::endl << std::endl;
-
+    std::cout << "Optimization finished in " << optimization_ms << " ms" << std::endl << std::endl;
 
     /// ========== Final results ============================================================ ///
-    // Find the globally best walker on the host.
-    cudaMemcpy(h_best_energy, d_best_energy, config.n_walkers * sizeof(double), cudaMemcpyDeviceToHost);
+    double* h_best = new double[(size_t)config.n_walkers * config.dimension];
     cudaMemcpy(h_best, d_best, coords_bytes, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_best_energy, d_best_energy, config.n_walkers * sizeof(double), cudaMemcpyDeviceToHost);
 
     int best_walker = 0;
     for (int w = 1; w < config.n_walkers; ++w) {
@@ -166,8 +149,6 @@ int main(int argc, char** argv) {
     result_file << std::endl;
     std::cout << "Best energy: " << std::setprecision(10) << best_energy << std::endl;
 
-    // Gap to the known putative global minimum, when tabulated (reported only here;
-    // the search itself never sees it).
     double known = known_lj_minimum(config.n_atoms);
     if (!std::isnan(known)) {
         double gap = best_energy - known;
@@ -177,11 +158,9 @@ int main(int argc, char** argv) {
     } else {
         std::cout << "No tabulated minimum for N=" << config.n_atoms << std::endl;
     }
-
-
     /// ========== Cleanup ==================================================================== ///
-    delete[] h_best;
     delete[] h_best_energy;
+    delete[] h_best;
     delete[] h_temps;
     cudaFree(d_current);
     cudaFree(d_trial);

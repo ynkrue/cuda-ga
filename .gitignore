@@ -2,16 +2,19 @@
 .vscode/
 .idea/
 
-# apple
+# Apple
 .DS_Store
 
-# build
+# Build
 *.o
 bin/
 build/
 
-# run outputs (keep the directories, not their contents)
-output/*
-logs/*
-!output/.gitkeep
-!logs/.gitkeep
+# Project metadata (internal, not for submission)
+.project*
+
+# Logs and job outputs
+*.out
+*.err
+logs/
+logs_*/
